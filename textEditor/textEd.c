@@ -167,14 +167,14 @@ void abFree(struct abuf *ab) {
 
 // -----------------------------------------------------------------------------
 // draws a tilde on every row of the terminal just like Vim
-void editorDrawRows()
+void editorDrawRows(struct abuf *ab)
 {
   int y;
   for (y = 0; y < E.screenrows; y++) {
-    write(STDOUT_FILENO, "~", 1);
+    abAppend(ab, "~", 1);
 
     if (y < E.screenrows - 1) {
-      write(STDOUT_FILENO, "\r\n", 2);
+      abAppend(ab, "\r\n", 2);
     }
   }
 }
@@ -183,16 +183,22 @@ void editorDrawRows()
 // clear screen, draw tildes, and position cursor at top-left
 void editorRefreshScreen()
 {
-  write(STDOUT_FILENO, "\x1b[2J", 4);    // Writes a 4-byte escape sequence (\x1b, [, 2, J ) to the terminal to clear the screen 
+  struct abuf ab = ABUF_INIT;  // initialize a new empty buffer, ab
+
+  abAppend(&ab, "\x1b[2J", 4);    // Appends a 4-byte escape sequence (\x1b, [, 2, J ) to the buffer which will clear the screen 
                                          // \x1b is the escape character and "J" commands are used for erasing in the display 
-  write(STDOUT_FILENO, "\x1b[H", 3);  // Writes a 3-byte escape sequence (\x1b, [, H ) to the terminal to reposition the cursor
+  abAppend(&ab, "\x1b[H", 3);  // Appends a 3-byte escape sequence (\x1b, [, H ) to the buffer which will reposition the cursor
                                          // "H" commands take two parameters which default to 1 each if not specified
                                          // If you have an 80x24 size terminal \x1b[12;40H would move the cursor to the center of the screen
                                          // Escape sequence documentation: https://vt100.net/docs/vt100-ug/chapter3.html
                                          // More info on VT100: https://en.wikipedia.org/wiki/VT100    
                                          // Other terminals: https://en.wikipedia.org/wiki/Ncurses & https://en.wikipedia.org/wiki/Terminfo 
-  editorDrawRows();
-   write(STDOUT_FILENO, "\x1b[H", 3);
+  editorDrawRows(&ab);  // append tildes
+
+  abAppend(&ab, "\x1b[H", 3);  // append another 3-byte escape sequence (\x1b, [, H ) to the buffer which will reposition the cursor
+
+   write(STDOUT_FILENO, ab.b, ab.len);  // wriet the contents of the buffer to the terminal
+   abFree(&ab);  // deallocate the buffer memory
 }
 
 
