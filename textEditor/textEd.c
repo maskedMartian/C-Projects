@@ -1,10 +1,12 @@
 // Small command line text editor that will run in a Linux terminal. 
 
+// Small changes
+
 /*** includes ***/
 
 #include <ctype.h>      // needed for iscntrl()
 #include <errno.h>      // needed for errno, EAGAIN
-#include <stdio.h>      // needed for perror(), printf()
+#include <stdio.h>      // needed for perror(), printf(), sscanf()
 #include <stdlib.h>     // Needed for exit(), atexit()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -106,11 +108,14 @@ int getCursorPosition(int *rows, int *cols)
   }
   buf[i] = '\0';  // terminate the string in buf with a null character
 
-  printf("\r\n&buf[1]: '%s'\r\n", &buf[1]);  // pass in &buf[1] so we skip the escape character held in &buf[0], otherwise the terminal
-                                             // would interpret this as an escape sequence and not display it.
-  editorReadKey();
+  if (buf[0] != '\x1b' || buf[1] != '[') {  // check that buf[] contains an escape sequence, if not return -1 (error)
+    return -1;
+  }
+  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) {  // copy the contents of buf[2], buf[3] into rows, cols respectively 
+    return -1;
+  }
 
-  return -1;
+  return 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -119,7 +124,7 @@ int getWindowSize(int *rows, int *cols)
 {
   struct winsize ws;
 
-  if (1 || ioctl(STDOUT_FILENO, TIOCGWINSZ, & ws) == -1 || ws.ws_col == 0) {
+  if (ioctl(STDOUT_FILENO, TIOCGWINSZ, & ws) == -1 || ws.ws_col == 0) {
     if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12 ) {  // writes 2 escape sequence characters, the first (C command) moves the
       return -1;                                                  // cursor 999 spaces to the right, the second moves it 999 spaces down
     }
