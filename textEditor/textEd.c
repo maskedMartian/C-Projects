@@ -7,7 +7,8 @@
 #include <ctype.h>      // needed for iscntrl()
 #include <errno.h>      // needed for errno, EAGAIN
 #include <stdio.h>      // needed for perror(), printf(), sscanf()
-#include <stdlib.h>     // Needed for exit(), atexit()
+#include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free()
+#include <string.h>     // Needed for memcpy()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
                         // IXON, OPOST, CS8, ECHO, ICANON, IEXTEN, ISIG, VMIN, VTIME
@@ -136,6 +137,32 @@ int getWindowSize(int *rows, int *cols)
   }
 }
 
+/*** append buffer ***/
+
+struct abuf {
+  char *b;
+  int len;
+};
+
+#define ABUF_INIT { NULL, 0}
+
+// -----------------------------------------------------------------------------
+void abAppend(struct abuf *ab, const char *s, int len) {
+  char *new = realloc(ab->b, ab->len + len);  // allocate memeory for the new string
+
+  if (new == NULL) {
+    return;
+  }
+  memcpy(&new[ab->len], s, len);  // copy the contents of s onto the end of the contents of new
+  ab->b = new;  // update ab.b
+  ab->len += len;  // update ab.len
+}
+
+// -----------------------------------------------------------------------------
+void abFree(struct abuf *ab) {
+  free(ab->b);
+}
+
 /*** output ***/
 
 // -----------------------------------------------------------------------------
@@ -144,7 +171,11 @@ void editorDrawRows()
 {
   int y;
   for (y = 0; y < E.screenrows; y++) {
-    write(STDOUT_FILENO, "~\r\n", 3);
+    write(STDOUT_FILENO, "~", 1);
+
+    if (y < E.screenrows - 1) {
+      write(STDOUT_FILENO, "\r\n", 2);
+    }
   }
 }
 
