@@ -201,7 +201,8 @@ struct abuf {
 #define ABUF_INIT { NULL, 0}
 
 // -----------------------------------------------------------------------------
-void abAppend(struct abuf *ab, const char *s, int len) {
+void abAppend(struct abuf *ab, const char *s, int len) 
+{
   char *new = realloc(ab->b, ab->len + len);  // allocate memeory for the new string
 
   if (new == NULL) {
@@ -213,8 +214,10 @@ void abAppend(struct abuf *ab, const char *s, int len) {
 }
 
 // -----------------------------------------------------------------------------
-void abFree(struct abuf *ab) {
+void abFree(struct abuf *ab) 
+{
   free(ab->b);
+  // comment just so I can collapse this function
 }
 
 /*** output ***/
