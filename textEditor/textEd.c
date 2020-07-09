@@ -19,6 +19,13 @@
 #define CTRL_KEY(k)        ((k) & 0x1F)  // unset the upper 3 bits of k
 #define TEXT_ED_VERSION    "0.0.1"
 
+enum editorKey {
+  ARROW_LEFT = 'a';
+  ARROW_RIGHT = 'd';
+  ARROW_UP = 'w';
+  ARROW_DOWN = 's';
+};
+
 /*** data ***/
 
 struct editorConfig {
@@ -82,11 +89,29 @@ char editorReadKey()
   int nread;
   char c;
   while ((nread = read(STDIN_FILENO, &c, 1)) != 1) {  // read 1 byte from standard input (keyboard) into c
-    if (nread == -1 && errno != EAGAIN) {             // and exit program if there is an error
-      die("read");
-    }
+    if (nread == -1 && errno != EAGAIN) die("read");  // and exit program if there is an error
   }
-  return c;
+
+  if (c == '\x1b') {  // if c is an escape charater
+    char seq[3];
+
+    // read the next 2 bytes into seq
+    if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';
+    if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';
+
+    if (seq[0] == '[') {
+      switch (seq[1]) {  // Arrow key was pressed
+        case 'A': return ARROW_UP;
+        case 'B': return ARROW_DOWN;
+        case 'C': return ARROW_RIGHT;
+        case 'D': return ARROW_LEFT;
+      }
+    }
+
+    return '\x1b';
+  } else {
+    return c;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -204,7 +229,8 @@ void editorDrawRows(struct abuf *ab)
 }
 
 // -----------------------------------------------------------------------------
-void editorRefreshScreen() {
+void editorRefreshScreen() 
+{
   struct abuf ab = ABUF_INIT;
 
   abAppend(&ab, "\x1b[?25l", 6);  // set mode escape sequence - hide cursor
@@ -250,6 +276,25 @@ void editorRefreshScreen()
 /*** input ***/
 
 // -----------------------------------------------------------------------------
+void editorMoveCursor(char key)
+{
+  switch (key) {
+    case ARROW_LEFT:
+      E.cx--;
+      break;
+    case ARROW_RIGHT:
+      E.cx++;
+      break;
+    case ARROW_UP:
+      E.cy--;
+      break;
+    case ARROW_DOWN:
+      E.cy++;
+      break;
+  }
+}
+
+// -----------------------------------------------------------------------------
 // waits for a keypress and handles it
 void editorProcessKeypress()
 {
@@ -260,6 +305,13 @@ void editorProcessKeypress()
       write(STDOUT_FILENO, "\x1b[2J", 4);  // clear the screen
       write(STDOUT_FILENO, "\x1b[H", 3);  // position the cursor at the top left of the screen
       exit(0);
+      break;
+
+    case ARROW_UP:
+    case ARROW_DOWN:
+    case ARROW_LEFT:
+    case ARROW_RIGHT:
+      editorMoveCursor(c);
       break;
   }
 }
