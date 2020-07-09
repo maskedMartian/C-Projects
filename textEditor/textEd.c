@@ -6,7 +6,7 @@
 
 #include <ctype.h>      // needed for iscntrl()
 #include <errno.h>      // needed for errno, EAGAIN
-#include <stdio.h>      // needed for perror(), printf(), sscanf()
+#include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free()
 #include <string.h>     // Needed for memcpy()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
@@ -16,7 +16,8 @@
 
 /*** defines ***/
 
-#define CTRL_KEY(k)    ((k) & 0x1F)  // unset the upper 3 bits of k
+#define CTRL_KEY(k)        ((k) & 0x1F)  // unset the upper 3 bits of k
+#define TEXT_ED_VERSION    "0.0.1"
 
 /*** data ***/
 
@@ -171,14 +172,46 @@ void editorDrawRows(struct abuf *ab)
 {
   int y;
   for (y = 0; y < E.screenrows; y++) {
-    abAppend(ab, "~", 1);
+    if (y == E.screenrows / 3) {
+      char welcome[80];
+      int welcomelen = snprintf(welcome, sizeof(welcome),
+        "Text Editor -- version %s", TEXT_ED_VERSION);
+      if (welcomelen > E.screencols) {
+        welcomelen = E.screencols;
+      }
+      abAppend(ab, welcome,welcomelen);
+    } else {
+      abAppend(ab, "~", 1);
+    }
 
+    abAppend(ab, "\x1b[K", 3);  // append a 3-byte escape sequence which erases the line right of the cursor
+                                // "\x1b[2K" - erases whole line
+                                // "\x1b[1K" - erases line to the left of the cursor
+                                // "\x1b[0K" - erases line to the rightt of the cursor (same as "\x1b[K")
     if (y < E.screenrows - 1) {
       abAppend(ab, "\r\n", 2);
     }
   }
 }
 
+// -----------------------------------------------------------------------------
+void editorRefreshScreen() {
+  struct abuf ab = ABUF_INIT;
+
+  abAppend(&ab, "\x1b[?25l", 6);  // set mode escape sequence - hide cursor
+  // abAppend(&ab, "\x1b[2J", 4); REMOVED
+  abAppend(&ab, "\x1b[H", 3);
+
+  editorDrawRows(&ab);
+
+  abAppend(&ab, "\x1b[H", 3);
+  abAppend(&ab, "\x1b[?25h", 6);  // reset mode escape sequence - show cursor
+  
+  write(STDOUT_FILENO, ab.b, ab.len);
+  abFree(&ab);
+}
+
+#if 0
 // -----------------------------------------------------------------------------
 // clear screen, draw tildes, and position cursor at top-left
 void editorRefreshScreen()
@@ -200,7 +233,7 @@ void editorRefreshScreen()
    write(STDOUT_FILENO, ab.b, ab.len);  // wriet the contents of the buffer to the terminal
    abFree(&ab);  // deallocate the buffer memory
 }
-
+#endif
 
 /*** input ***/
 
