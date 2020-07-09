@@ -8,7 +8,7 @@
 #include <errno.h>      // needed for errno, EAGAIN
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free()
-#include <string.h>     // Needed for memcpy()
+#include <string.h>     // Needed for memcpy(), strlen()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
                         // IXON, OPOST, CS8, ECHO, ICANON, IEXTEN, ISIG, VMIN, VTIME
@@ -22,6 +22,7 @@
 /*** data ***/
 
 struct editorConfig {
+  int cx, cy;
   int screenrows;
   int screencols;
   struct termios orig_termios;
@@ -179,6 +180,14 @@ void editorDrawRows(struct abuf *ab)
       if (welcomelen > E.screencols) {
         welcomelen = E.screencols;
       }
+      int padding = (E.screencols - welcomelen) / 2;
+      if (padding) {
+        abAppend(ab, "~", 1);
+        padding--;
+      }
+      while (padding--) {
+        abAppend(ab, " ", 1);
+      }
       abAppend(ab, welcome,welcomelen);
     } else {
       abAppend(ab, "~", 1);
@@ -204,7 +213,10 @@ void editorRefreshScreen() {
 
   editorDrawRows(&ab);
 
-  abAppend(&ab, "\x1b[H", 3);
+  char buf[32];
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+  abAppend(&ab, buf, strlen(buf));
+
   abAppend(&ab, "\x1b[?25h", 6);  // reset mode escape sequence - show cursor
   
   write(STDOUT_FILENO, ab.b, ab.len);
@@ -258,6 +270,9 @@ void editorProcessKeypress()
 // Initialize all the fields in the E struct
 void initEditor()
 {
+  E.cx = 0;
+  E.cy = 0;
+
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
     die("getWindowSize");
   }
