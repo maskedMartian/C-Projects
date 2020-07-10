@@ -33,10 +33,17 @@ enum editorKey {
 
 /*** data ***/
 
+typedef struct erow {  // the typedef lets us refer to the type as "erow" instead of "struct erow"
+  int size;
+  char *chars;
+} erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
+
 struct editorConfig {
   int cx, cy;
   int screenrows;
   int screencols;
+  int numrows;  // the number of rows (lines) of text being displayed/stored by the editor
+  erow row;
   struct termios orig_termios;
 };
 
@@ -379,6 +386,7 @@ void initEditor()
 {
   E.cx = 0;
   E.cy = 0;
+  E.numrows = 0;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
     die("getWindowSize");
