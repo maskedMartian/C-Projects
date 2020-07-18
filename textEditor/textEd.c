@@ -45,7 +45,8 @@ typedef struct erow {  // the typedef lets us refer to the type as "erow" instea
 
 struct editorConfig {
   int cx, cy;
-  int rowoff;  // keeps track of what row of the file the user is currently scrolled to
+  int rowoff;  // row offset - keeps track of what row of the file the user is currently scrolled to
+  int coloff;  // column offset - keeps track of what column of the file the user is currently scrolled to
   int screenrows;
   int screencols;
   int numrows;  // the number of rows (lines) of text being displayed/stored by the editor
@@ -280,6 +281,12 @@ void editorScroll() {
   if (E.cy >= E.rowoff + E.screenrows) {
     E.rowoff = E.cy - E.screenrows + 1;
   }
+  if (E.cx < E.coloff) {
+    E.coloff = E.cx;
+  }
+  if (E.cx >= E.coloff + E.screencols) {
+    E.coloff = E.cx - E.screencols + 1;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -308,9 +315,10 @@ void editorDrawRows(struct abuf *ab)
         abAppend(ab, "~", 1);
       }
     } else {
-      int len = E.row[filerow].size;
+      int len = E.row[filerow].size - E.coloff;
+      if (len < 0) len = 0;
       if (len > E.screencols) len = E.screencols;
-      abAppend(ab, E.row[filerow].chars, len);
+      abAppend(ab, &E.row[filerow].chars[E.coloff], len);
     }
 
     abAppend(ab, "\x1b[K", 3);  // append a 3-byte escape sequence which erases the line right of the cursor
@@ -336,7 +344,8 @@ void editorRefreshScreen() {
   editorDrawRows(&ab);
 
   char buf[32];
-  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy - E.rowoff, E.cx + 1);
+  snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1,
+                                            (E.cx - E.coloff) + 1);
   abAppend(&ab, buf, strlen(buf));
 
   abAppend(&ab, "\x1b[?25h", 6);  // reset mode escape sequence - show cursor
@@ -372,18 +381,20 @@ void editorRefreshScreen()
 /*** input ***/
 
 // -----------------------------------------------------------------------------
-void editorMoveCursor(int key)
-{
+void editorMoveCursor(int key) {
+  erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+
   switch (key) {
     case ARROW_LEFT:
       if (E.cx != 0) {
         E.cx--;
+      } else if (E.cy > 0) {
+        E.cy--;
+        E.cx = E.row[E.cy].size;
       }
       break;
     case ARROW_RIGHT:
-      if (E.cx != E.screencols - 1) {
-        E.cx++;
-      }
+      E.cx++;
       break;
     case ARROW_UP:
       if (E.cy != 0) {
@@ -395,6 +406,12 @@ void editorMoveCursor(int key)
         E.cy++;
       }
       break;
+  }
+
+  row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
+  int rowlen = row ? row->size : 0;
+  if (E.cx > rowlen) {
+    E.cx = rowlen;
   }
 }
 
@@ -446,6 +463,7 @@ void initEditor()
   E.cx = 0;
   E.cy = 0;
   E.rowoff = 0;  // we'll be scrolled to the top of the file by default
+  E.coloff = 0;  // we'll be scrolled to the left of the file by default
   E.numrows = 0;
   E.row = NULL;
 
