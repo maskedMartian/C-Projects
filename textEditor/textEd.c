@@ -12,7 +12,7 @@
 #include <errno.h>      // needed for errno, EAGAIN
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen()
+#include <string.h>     // Needed for memcpy(), strlen(), strup()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -57,6 +57,7 @@ struct editorConfig {
   int screencols;
   int numrows;  // the number of rows (lines) of text being displayed/stored by the editor
   erow *row;
+  char *filename;
   struct termios orig_termios;
 };
 
@@ -273,6 +274,8 @@ void editorAppendRow(char *s, size_t len) {
 // -----------------------------------------------------------------------------
 // for opening and reading a file from disk
 void editorOpen(char *filename) {
+  free(E.filename);
+  E.filename = strdup(filename);
   FILE *fp = fopen(filename, "r");
   if (!fp) die("fopen");
 
@@ -375,13 +378,37 @@ void editorDrawRows(struct abuf *ab)
     }
 
     abAppend(ab, "\x1b[K", 3);  // append a 3-byte escape sequence which erases the line right of the cursor
-                                // "\x1b[2K" - erases whole line
-                                // "\x1b[1K" - erases line to the left of the cursor
-                                // "\x1b[0K" - erases line to the rightt of the cursor (same as "\x1b[K")
-    if (y < E.screenrows - 1) {
-      abAppend(ab, "\r\n", 2);
+                                  // "\x1b[2K" - erases whole line
+                                  // "\x1b[1K" - erases line to the left of the cursor
+                                  // "\x1b[0K" - erases line to the rightt of the cursor (same as "\x1b[K")
+    abAppend(ab, "\r\n", 2);
+  }
+}
+
+// -----------------------------------------------------------------------------
+void editorDrawStatusBar(struct abuf *ab) {
+  abAppend(ab, "\x1b[7m", 4);   // The escape sequence <esc>[7m switches to inverted colors
+                                // The m command (Select Graphic Rendition) causes the text printed after it to be printed with various 
+                                // possible attributes including bold (1), underscore (4), blink (5), and inverted colors (7)
+                                // For example, you could specify all of these attributes using the command <esc>[1;4;5;7m. An argument 
+                                // of 0 clears all attributes, and is the default argument, so we use <esc>[m to go back to normal text formatting.
+  char status[80], rstatus[80];
+  int len = snprintf(status, sizeof(status), "%.20s - %d lines",
+    E.filename ? E.filename : "[No Name]", E.numrows);
+  int rlen = snprint(rstatus, sizeof(rstatus), "%d/%d",
+    E.cy + 1, E.numrows);
+  if (len > E.screencols) len = E.screencols;
+  abAppend(ab, status, len);
+  while (len < E.screencols) {
+    if (E.screencols - len == rlen) {
+      abAppend(ab, rstatus, rlen);
+      break;
+    } else {
+      abAppend(ab, " ", 1);
+      len++;
     }
   }
+  abAppend(ab, "\x1b[m", 3);  // The escape sequence <esc>[m switches back to normal formatting
 }
 
 // -----------------------------------------------------------------------------
@@ -395,6 +422,7 @@ void editorRefreshScreen() {
   abAppend(&ab, "\x1b[H", 3);
 
   editorDrawRows(&ab);
+  editorDrawStatusBar(&ab);
 
   char buf[32];
   snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1,
@@ -491,12 +519,20 @@ void editorProcessKeypress()
       break;
 
     case END_KEY:
-      E.cx = E.screencols - 1;
+      if (E.cy < E.numrows)
+        E.cx = E.row[E.cy].size;
       break;
 
     case PAGE_UP:
     case PAGE_DOWN:
       {
+        if (c == PAGE_UP) {
+          E.cy = E.rowoff;
+        } else if (c == PAGE_DOWN) {
+          E.cy = E.rowoff + E.screenrows - 1;
+          if (E.cy > E.numrows) E.cy = E.numrows;
+        }
+
         int times = E.screenrows;
         while (times--)
           editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
@@ -516,8 +552,7 @@ void editorProcessKeypress()
 
 // -----------------------------------------------------------------------------
 // Initialize all the fields in the E struct
-void initEditor()
-{
+void initEditor() {
   E.cx = 0;
   E.cy = 0;
   E.rx = 0;
@@ -525,10 +560,10 @@ void initEditor()
   E.coloff = 0;  // we'll be scrolled to the left of the file by default
   E.numrows = 0;
   E.row = NULL;
+  E.filename = NULL;
 
-  if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
-    die("getWindowSize");
-  }
+  if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
+  E.screenrows -= 1;
 }
 
 // -----------------------------------------------------------------------------
