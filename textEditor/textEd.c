@@ -10,13 +10,15 @@
 
 #include <ctype.h>      // needed for iscntrl()
 #include <errno.h>      // needed for errno, EAGAIN
-#include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline()
+#include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
+#include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
 #include <string.h>     // Needed for memcpy(), strlen(), strup()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
                         // IXON, OPOST, CS8, ECHO, ICANON, IEXTEN, ISIG, VMIN, VTIME
+#include <time.h>       // Needed for time_t, time()
 #include <unistd.h>     // Needed for read(), STDIN_FILENO, write(), STDOUT_FILENO
 
 /*** defines ***/
@@ -58,6 +60,8 @@ struct editorConfig {
   int numrows;  // the number of rows (lines) of text being displayed/stored by the editor
   erow *row;
   char *filename;
+  char statusmsg[80];
+  time_t statusmsg_time;
   struct termios orig_termios;
 };
 
@@ -395,7 +399,7 @@ void editorDrawStatusBar(struct abuf *ab) {
   char status[80], rstatus[80];
   int len = snprintf(status, sizeof(status), "%.20s - %d lines",
     E.filename ? E.filename : "[No Name]", E.numrows);
-  int rlen = snprint(rstatus, sizeof(rstatus), "%d/%d",
+  int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
     E.cy + 1, E.numrows);
   if (len > E.screencols) len = E.screencols;
   abAppend(ab, status, len);
@@ -409,6 +413,16 @@ void editorDrawStatusBar(struct abuf *ab) {
     }
   }
   abAppend(ab, "\x1b[m", 3);  // The escape sequence <esc>[m switches back to normal formatting
+  abAppend(ab, "\r\n", 2);
+}
+
+// -----------------------------------------------------------------------------
+void editorDrawMessageBar(struct abuf *ab) {
+  abAppend(ab, "\x1b[K", 3);  // clear the message bar
+  int msglen = strlen(E.statusmsg);
+  if (msglen > E.screencols) msglen = E.screencols;  // if message length is grater than the width of the screen, cut it down
+  if (msglen && time(NULL) - E.statusmsg_time < 5)  // display the message only if it is lenn than 5 seconds old
+    abAppend(ab, E.statusmsg, msglen);
 }
 
 // -----------------------------------------------------------------------------
@@ -423,6 +437,7 @@ void editorRefreshScreen() {
 
   editorDrawRows(&ab);
   editorDrawStatusBar(&ab);
+  editorDrawMessageBar(&ab);
 
   char buf[32];
   snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cy - E.rowoff) + 1,
@@ -458,6 +473,15 @@ void editorRefreshScreen()
    abFree(&ab);  // deallocate the buffer memory
 }
 #endif
+
+// -----------------------------------------------------------------------------
+void editorSetStatusMessage(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(E.statusmsg, sizeof(E.statusmsg), fmt, ap);
+  va_end(ap);
+  E.statusmsg_time = time(NULL);
+}
 
 /*** input ***/
 
@@ -561,9 +585,11 @@ void initEditor() {
   E.numrows = 0;
   E.row = NULL;
   E.filename = NULL;
+  E.statusmsg[0] = '\0';
+  E.statusmsg_time = 0;
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
-  E.screenrows -= 1;
+  E.screenrows -= 2;
 }
 
 // -----------------------------------------------------------------------------
@@ -574,6 +600,8 @@ int main(int argc, char *argv[])
   if (argc >= 2) {
     editorOpen(argv[1]);
   }
+
+  editorSetStatusMessage("HELP: Ctrl-Q = quit");
   
   while (1) 
   {
