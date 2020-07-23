@@ -51,7 +51,7 @@ typedef struct erow {  // the typedef lets us refer to the type as "erow" instea
 } erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
 
 struct editorConfig {
-  int cx, cy;  // cx - horizontal index into the chars field of erow 
+  int cx, cy;  // cx - horizontal index into the chars field of erow (cursor location???)
   int rx;  //horizontal index into the render field of erow - if there are no tab son the current line, rx will be the same as cx 
   int rowoff;  // row offset - keeps track of what row of the file the user is currently scrolled to
   int coloff;  // column offset - keeps track of what column of the file the user is currently scrolled to
@@ -284,6 +284,19 @@ void editorRowInsertChar(erow *row, int at, int c) {
   row->size++;  // increment the size of the chars array, 
   row->chars[at] = c;  // assign the character to its position in the array
   editorUpdateRow(row);  // call editorUpdateRow() so that the render and rsize fields get updated with the new row content.
+}
+
+/*** editor operations ***/  // This section will contain functions that we’ll call from editorProcessKeypress() when we’re mapping keypresses to various text editing operations
+
+
+// -----------------------------------------------------------------------------
+// take a character and use editorRowInsertChar() to insert that character into the position that the cursor is at.
+void editorInsertChar(int c) {
+  if (E.cy == E.numrows) {    // if the cursor is located on the very last line of the editor text (the cursor is on the tilde line after the end of the file, so we need to append a new row)
+    editorAppendRow("", 0);  // allocate memory space for a new row - the new character will be inserted on a new row 
+  }
+  editorRowInsertChar(&E.row[E.cy], E.cx, c);  // insert the character (c) into the specific row of the row array
+  E.cx++;  // move the cursor forward so that the next character the user inserts will go after the character just inserted
 }
 
 /*** file i/o ***/
@@ -581,6 +594,10 @@ void editorProcessKeypress()
     case ARROW_LEFT:
     case ARROW_RIGHT:
       editorMoveCursor(c);
+      break;
+
+    default:
+      editorInsertChar(c);  // 7-23-2020:5:23pm - step 103 - We’ve now officially upgraded our text viewer to a text editor
       break;
   }
 }
