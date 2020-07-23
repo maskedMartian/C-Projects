@@ -13,7 +13,7 @@
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(). memmove()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -44,10 +44,10 @@ enum editorKey {
 /*** data ***/
 
 typedef struct erow {  // the typedef lets us refer to the type as "erow" instead of "struct erow"
-  int size;
-  int rsize;  // the size of the contents of render
-  char *chars;
-  char *render;
+  int size;  // the quantity of elements in the *chars array
+  int rsize;  // the quantity of elements in the *render array
+  char *chars;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
+  char *render;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
 } erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
 
 struct editorConfig {
@@ -55,14 +55,14 @@ struct editorConfig {
   int rx;  //horizontal index into the render field of erow - if there are no tab son the current line, rx will be the same as cx 
   int rowoff;  // row offset - keeps track of what row of the file the user is currently scrolled to
   int coloff;  // column offset - keeps track of what column of the file the user is currently scrolled to
-  int screenrows;
-  int screencols;
+  int screenrows;  // qty of rows on the screen - window size
+  int screencols;  // qty of columns on the screen - window size
   int numrows;  // the number of rows (lines) of text being displayed/stored by the editor
-  erow *row;
-  char *filename;
-  char statusmsg[80];
-  time_t statusmsg_time;
-  struct termios orig_termios;
+  erow *row;  // Hold a single row of test, both as read from a file, and as displayed on the screen
+  char *filename;  // Name of the file being edited
+  char statusmsg[80];  // holds an 80 character message to the user displayed on the status bar.
+  time_t statusmsg_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
+  struct termios orig_termios;  // structure to hold the original state of the terminal when our program began, before we started altering its state
 };
 
 struct editorConfig E;
@@ -206,7 +206,7 @@ int getWindowSize(int *rows, int *cols)
 
   if (ioctl(STDOUT_FILENO, TIOCGWINSZ, & ws) == -1 || ws.ws_col == 0) {
     if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12 ) {  // writes 2 escape sequence characters, the first (C command) moves the
-      return -1;                                                  // cursor 999 spaces to the right, the second moves it 999 spaces down
+      return -1;  // Error                                        // cursor 999 spaces to the right, the second moves it 999 spaces down
     }
     return getCursorPosition(rows, cols);
   } else {
@@ -271,6 +271,19 @@ void editorAppendRow(char *s, size_t len) {
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
+}
+
+// -----------------------------------------------------------------------------
+// erow *row - pointer to an erow struct
+// int at - the index at which we want to insert the character (index to insert 'at'???)
+// int c - new character to insert
+void editorRowInsertChar(erow *row, int at, int c) {
+  if (at < 0 || at > row->size) at = row->size;  // validate at - Notice that at is allowed to go one character past the end of the string, in which case the character should be inserted at the end of the string.
+  row->chars = realloc(row->chars, row->size + 2);  // Then we allocate one more byte for the chars of the erow (we add 2 because we also have to make room for the null byte)
+  memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);  // use memmove() to make room for the new character. move everything from index at to the end of the string over one character leaving a "hole" at index at.  memmove() comes from <string.h>. It is like memcpy(), but is safe to use when the source and destination arrays overlap.
+  row->size++;  // increment the size of the chars array, 
+  row->chars[at] = c;  // assign the character to its position in the array
+  editorUpdateRow(row);  // call editorUpdateRow() so that the render and rsize fields get updated with the new row content.
 }
 
 /*** file i/o ***/
