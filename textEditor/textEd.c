@@ -30,6 +30,7 @@
 #define CTRL_KEY(k)        ((k) & 0x1F)  // unset the upper 3 bits of k
 
 enum editorKey {
+  BACKSPACE = 127,
   ARROW_LEFT = 1000,
   ARROW_RIGHT,
   ARROW_UP,
@@ -68,6 +69,14 @@ struct editorConfig {
 struct editorConfig E;
 
 /*** terminal ***/
+// 88888888888 8888888888 8888888b.  888b     d888 8888888 888b    888        d8888 888      
+//     888     888        888   Y88b 8888b   d8888   888   8888b   888       d88888 888      
+//     888     888        888    888 88888b.d88888   888   88888b  888      d88P888 888      
+//     888     8888888    888   d88P 888Y88888P888   888   888Y88b 888     d88P 888 888      
+//     888     888        8888888P"  888 Y888P 888   888   888 Y88b888    d88P  888 888      
+//     888     888        888 T88b   888  Y8P  888   888   888  Y88888   d88P   888 888      
+//     888     888        888  T88b  888   "   888   888   888   Y8888  d8888888888 888      
+//     888     8888888888 888   T88b 888       888 8888888 888    Y888 d88P     888 88888888 
 
 // -----------------------------------------------------------------------------
 void die(const char *s)  // prints error message and exits program with error code 1
@@ -217,6 +226,14 @@ int getWindowSize(int *rows, int *cols)
 }
 
 /*** row operations ***/
+// 8888888b.   .d88888b.  888       888       .d88888b.  8888888b.  8888888888 8888888b.         d8888 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
+// 888   Y88b d88P" "Y88b 888   o   888      d88P" "Y88b 888   Y88b 888        888   Y88b       d88888     888       888  d88P" "Y88b 8888b   888 d88P  Y88b 
+// 888    888 888     888 888  d8b  888      888     888 888    888 888        888    888      d88P888     888       888  888     888 88888b  888 Y88b.      
+// 888   d88P 888     888 888 d888b 888      888     888 888   d88P 8888888    888   d88P     d88P 888     888       888  888     888 888Y88b 888  "Y888b.   
+// 8888888P"  888     888 888d88888b888      888     888 8888888P"  888        8888888P"     d88P  888     888       888  888     888 888 Y88b888     "Y88b. 
+// 888 T88b   888     888 88888P Y88888      888     888 888        888        888 T88b     d88P   888     888       888  888     888 888  Y88888       "888 
+// 888  T88b  Y88b. .d88P 8888P   Y8888      Y88b. .d88P 888        888        888  T88b   d8888888888     888       888  Y88b. .d88P 888   Y8888 Y88b  d88P 
+// 888   T88b  "Y88888P"  888P     Y888       "Y88888P"  888        8888888888 888   T88b d88P     888     888     8888888 "Y88888P"  888    Y888  "Y8888P" 
 
 // -----------------------------------------------------------------------------
 // converts a chars index into a render index
@@ -287,7 +304,14 @@ void editorRowInsertChar(erow *row, int at, int c) {
 }
 
 /*** editor operations ***/  // This section will contain functions that we’ll call from editorProcessKeypress() when we’re mapping keypresses to various text editing operations
-
+// 8888888888 8888888b. 8888888 88888888888 .d88888b.  8888888b.        .d88888b.  8888888b.  8888888888 8888888b.         d8888 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
+// 888        888  "Y88b  888       888    d88P" "Y88b 888   Y88b      d88P" "Y88b 888   Y88b 888        888   Y88b       d88888     888       888  d88P" "Y88b 8888b   888 d88P  Y88b 
+// 888        888    888  888       888    888     888 888    888      888     888 888    888 888        888    888      d88P888     888       888  888     888 88888b  888 Y88b.      
+// 8888888    888    888  888       888    888     888 888   d88P      888     888 888   d88P 8888888    888   d88P     d88P 888     888       888  888     888 888Y88b 888  "Y888b.   
+// 888        888    888  888       888    888     888 8888888P"       888     888 8888888P"  888        8888888P"     d88P  888     888       888  888     888 888 Y88b888     "Y88b. 
+// 888        888    888  888       888    888     888 888 T88b        888     888 888        888        888 T88b     d88P   888     888       888  888     888 888  Y88888       "888 
+// 888        888  .d88P  888       888    Y88b. .d88P 888  T88b       Y88b. .d88P 888        888        888  T88b   d8888888888     888       888  Y88b. .d88P 888   Y8888 Y88b  d88P 
+// 8888888888 8888888P" 8888888     888     "Y88888P"  888   T88b       "Y88888P"  888        8888888888 888   T88b d88P     888     888     8888888 "Y88888P"  888    Y888  "Y8888P"
 
 // -----------------------------------------------------------------------------
 // take a character and use editorRowInsertChar() to insert that character into the position that the cursor is at.
@@ -300,7 +324,15 @@ void editorInsertChar(int c) {
 }
 
 /*** file i/o ***/
-
+// 8888888888 8888888 888      8888888888      8888888        d88P  .d88888b.  
+// 888          888   888      888               888         d88P  d88P" "Y88b 
+// 888          888   888      888               888        d88P   888     888 
+// 8888888      888   888      8888888           888       d88P    888     888 
+// 888          888   888      888               888      d88P     888     888 
+// 888          888   888      888               888     d88P      888     888 
+// 888          888   888      888               888    d88P       Y88b. .d88P 
+// 888        8888888 88888888 8888888888      8888888 d88P         "Y88888P"  
+                                                                                                                                                     
 // -----------------------------------------------------------------------------
 // for opening and reading a file from disk
 void editorOpen(char *filename) {
@@ -352,6 +384,14 @@ void abFree(struct abuf *ab)
 }
 
 /*** output ***/
+//  .d88888b.  888     888 88888888888 8888888b.  888     888 88888888888 
+// d88P" "Y88b 888     888     888     888   Y88b 888     888     888     
+// 888     888 888     888     888     888    888 888     888     888     
+// 888     888 888     888     888     888   d88P 888     888     888     
+// 888     888 888     888     888     8888888P"  888     888     888     
+// 888     888 888     888     888     888        888     888     888     
+// Y88b. .d88P Y88b. .d88P     888     888        Y88b. .d88P     888     
+//  "Y88888P"   "Y88888P"      888     888         "Y88888P"      888     
 
 // -----------------------------------------------------------------------------
 //  check if the cursor has moved outside of the visible window, and if so, adjust E.rowoff so that the cursor is just inside the visible window.
@@ -510,6 +550,14 @@ void editorSetStatusMessage(const char *fmt, ...) {
 }
 
 /*** input ***/
+// 8888888 888b    888 8888888b.  888     888 88888888888 
+//   888   8888b   888 888   Y88b 888     888     888     
+//   888   88888b  888 888    888 888     888     888     
+//   888   888Y88b 888 888   d88P 888     888     888     
+//   888   888 Y88b888 8888888P"  888     888     888     
+//   888   888  Y88888 888        888     888     888     
+//   888   888   Y8888 888        Y88b. .d88P     888     
+// 8888888 888    Y888 888         "Y88888P"      888    
 
 // -----------------------------------------------------------------------------
 void editorMoveCursor(int key) {
@@ -558,6 +606,10 @@ void editorProcessKeypress()
   int c = editorReadKey();
 
   switch (c) {
+    case '\r':  // Enter key
+      /* TODO */
+    break;
+
     case CTRL_KEY('q'):  // exit program if ctrl-q is pressed
       write(STDOUT_FILENO, "\x1b[2J", 4);  // clear the screen
       write(STDOUT_FILENO, "\x1b[H", 3);  // position the cursor at the top left of the screen
@@ -571,6 +623,12 @@ void editorProcessKeypress()
     case END_KEY:
       if (E.cy < E.numrows)
         E.cx = E.row[E.cy].size;
+      break;
+
+    case BACKSPACE:      // mapped to 127
+    case CTRL_KEY('h'):  // sends the control code 8, which is originally what the Backspace character would send back in the day
+    case DEL_KEY:        // mapped to <esc>[3~ (as seen in chapter 3)
+      /*TODO*/
       break;
 
     case PAGE_UP:
@@ -596,6 +654,10 @@ void editorProcessKeypress()
       editorMoveCursor(c);
       break;
 
+    case CTRL_KEY('l'):  // ctrl-L is traditionally used to refresh the screen in terminal programs (we do nothing because the screen is refreshed with every keypress by default)
+    case '\x1b':  // escape - we ignore escape because there are many escape sequences we aren't handling, such as F1-F12
+      break;
+
     default:
       editorInsertChar(c);  // 7-23-2020:5:23pm - step 103 - We’ve now officially upgraded our text viewer to a text editor
       break;
@@ -603,6 +665,14 @@ void editorProcessKeypress()
 }
 
 /*** init ***/
+// 8888888 888b    888 8888888 88888888888 
+//   888   8888b   888   888       888     
+//   888   88888b  888   888       888     
+//   888   888Y88b 888   888       888     
+//   888   888 Y88b888   888       888     
+//   888   888  Y88888   888       888     
+//   888   888   Y8888   888       888     
+// 8888888 888    Y888 8888888     888     
 
 // -----------------------------------------------------------------------------
 // Initialize all the fields in the E struct
