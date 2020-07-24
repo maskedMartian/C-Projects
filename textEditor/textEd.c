@@ -61,6 +61,7 @@ struct editorConfig {
   int screencols;  // qty of columns on the screen - window size
   int numrows;  // the number of rows (lines) of text being displayed/stored by the editor
   erow *row;  // Hold a single row of test, both as read from a file, and as displayed on the screen
+  int dirty;  // dirty flag - We call a text buffer “dirty” if it has been modified since opening or saving the file - used to keep track of whether the text loaded in our editor differs from what’s in the file
   char *filename;  // Name of the file being edited
   char statusmsg[80];  // holds an 80 character message to the user displayed on the status bar.
   time_t statusmsg_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
@@ -301,6 +302,7 @@ void editorAppendRow(char *s, size_t len) {
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
+  E.dirty++;  // why not just set it to true? - and then set to false when save file
 }
 
 // -----------------------------------------------------------------------------
@@ -314,6 +316,7 @@ void editorRowInsertChar(erow *row, int at, int c) {
   row->size++;  // increment the size of the chars array, 
   row->chars[at] = c;  // assign the character to its position in the array
   editorUpdateRow(row);  // call editorUpdateRow() so that the render and rsize fields get updated with the new row content.
+  E.dirty++;  // why not just set it to true? - and then set to false when save file
 }
 
 /*** editor operations ***/  // This section will contain functions that we’ll call from editorProcessKeypress() when we’re mapping keypresses to various text editing operations
@@ -386,6 +389,7 @@ void editorOpen(char *filename) {
   }
   free(line);
   fclose(fp);
+  E.dirty = 0;  // reset the dirty flag
 }
 
 // -----------------------------------------------------------------------------
@@ -402,7 +406,8 @@ void editorSave() {
       if (write(fd, buf, len) == len) {  // write the contents of buf to the file referenced by fd
         close(fd);
         free(buf);
-        editorSetStatusMessage("%d bytes written to %s", len, E.filename);
+        E.dirty = 0;
+        editorSetStatusMessage("%d bytes written to disk", len);
         return;
       }
     }
@@ -531,8 +536,9 @@ void editorDrawStatusBar(struct abuf *ab) {
                                 // For example, you could specify all of these attributes using the command <esc>[1;4;5;7m. An argument 
                                 // of 0 clears all attributes, and is the default argument, so we use <esc>[m to go back to normal text formatting.
   char status[80], rstatus[80];
-  int len = snprintf(status, sizeof(status), "%.20s - %d lines",
-    E.filename ? E.filename : "[No Name]", E.numrows);
+  int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
+    E.filename ? E.filename : "[No Name]", E.numrows, 
+    E.dirty ? "(modified)" : "");
   int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
     E.cy + 1, E.numrows);
   if (len > E.screencols) len = E.screencols;
@@ -756,6 +762,7 @@ void initEditor() {
   E.coloff = 0;  // we'll be scrolled to the left of the file by default
   E.numrows = 0;
   E.row = NULL;
+  E.dirty = 0;
   E.filename = NULL;
   E.statusmsg[0] = '\0';
   E.statusmsg_time = 0;
