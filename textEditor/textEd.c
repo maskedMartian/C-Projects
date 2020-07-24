@@ -27,6 +27,7 @@
 
 #define TEXT_ED_VERSION    "0.0.1"
 #define TAB_STOP           8
+#define QUIT_TIMES         3
 
 #define CTRL_KEY(k)        ((k) & 0x1F)  // unset the upper 3 bits of k
 
@@ -306,6 +307,23 @@ void editorAppendRow(char *s, size_t len) {
 }
 
 // -----------------------------------------------------------------------------
+//  frees memory owned by a row
+void editorFreeRow(erow *row) {
+  free(row->render);
+  free(row->chars);
+}
+
+// -----------------------------------------------------------------------------
+// editorDelRow() looks a lot like editorRowDelChar(), because in both cases we are deleting a single element from an array of elements by its index.
+void editorDelRow(int at) {
+  if (at < 0 || at >= E.numrows) return;  // validate at index
+  editorFreeRow(&E.row[at]);  // free the memory owned by the row using editorFreeRow()
+  memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));  // use memmove() to overwrite the deleted row struct with the rest of the rows that come after it
+  E.numrows--;  
+  E.dirty++;
+}
+
+// -----------------------------------------------------------------------------
 // erow *row - pointer to an erow struct
 // int at - the index at which we want to insert the character (index to insert 'at'???)
 // int c - new character to insert
@@ -317,6 +335,28 @@ void editorRowInsertChar(erow *row, int at, int c) {
   row->chars[at] = c;  // assign the character to its position in the array
   editorUpdateRow(row);  // call editorUpdateRow() so that the render and rsize fields get updated with the new row content.
   E.dirty++;  // why not just set it to true? - and then set to false when save file
+}
+
+// -----------------------------------------------------------------------------
+// appends a string to the end of a row
+void editorRowAppendString(erow *row, char *s, size_t len) {
+  row->chars = realloc(row->chars, row->size + len + 1);  // The row’s new size is row->size + len + 1 (including the null byte), so first we allocate that much memory for row->chars
+  memcpy(&row-chars[row->size], s, len);
+  row->size += len;
+  row->chars[row->size] = '\0';
+  editorUpdateRow(row);
+  E.dirty++;
+}
+
+// -----------------------------------------------------------------------------
+// erow *row - pointer to an erow struct
+// int at - the index at which we want to insert the character (index to insert 'at'???)
+void editorRowDelChar(erow *row, int at) {
+  if (at < 0 || at >= row->size) return;
+  memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
+  row->size--;
+  editorUpdateRow(row);
+  E.dirty++;
 }
 
 /*** editor operations ***/  // This section will contain functions that we’ll call from editorProcessKeypress() when we’re mapping keypresses to various text editing operations
@@ -337,6 +377,20 @@ void editorInsertChar(int c) {
   }
   editorRowInsertChar(&E.row[E.cy], E.cx, c);  // insert the character (c) into the specific row of the row array
   E.cx++;  // move the cursor forward so that the next character the user inserts will go after the character just inserted
+}
+
+// -----------------------------------------------------------------------------
+// use editorRowDelChar() to delete a character at the position that the cursor is at.
+void editorDelChar() {
+  if (E.cy == E.numrows) return;  // do nothing if the cursor is on the tilde line - If the cursor’s past the end of the file, then there is nothing to delete, and we return immediately
+
+
+  // Otherwise, we get the erow the cursor is on, and if there is a character to the left of the cursor, we delete it and move the cursor one to the left
+  erow *row = &E.row[E.cy];
+  if (E.cx > 0) {
+    editorRowDelChar(row, E.cx - 1);
+    E.cx--;
+  }
 }
 
 /*** file i/o ***/
@@ -675,8 +729,9 @@ void editorMoveCursor(int key) {
 
 // -----------------------------------------------------------------------------
 // waits for a keypress and handles it
-void editorProcessKeypress()
-{
+void editorProcessKeypress(){
+  static int quit_times = QUIT_TIMES;
+
   int c = editorReadKey();
 
   switch (c) {
@@ -685,6 +740,12 @@ void editorProcessKeypress()
     break;
 
     case CTRL_KEY('q'):  // exit program if ctrl-q is pressed
+      if (E.dirty && quit_times > 0) {
+        editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+          "Press Ctrl-Q %d more times to quit", quit_times);
+        quit_times--;
+        return;
+      }
       write(STDOUT_FILENO, "\x1b[2J", 4);  // clear the screen
       write(STDOUT_FILENO, "\x1b[H", 3);  // position the cursor at the top left of the screen
       exit(0);
@@ -706,7 +767,8 @@ void editorProcessKeypress()
     case BACKSPACE:      // mapped to 127
     case CTRL_KEY('h'):  // sends the control code 8, which is originally what the Backspace character would send back in the day
     case DEL_KEY:        // mapped to <esc>[3~ (as seen in chapter 3)
-      /*TODO*/
+      if (c == DEL_KEY) editorMoveCursor(ARROW_RIGHT);  // pressing the right arrow and then backspace is equivalent to pressing the delete key
+      editorDelChar();
       break;
 
     case PAGE_UP:
@@ -739,7 +801,9 @@ void editorProcessKeypress()
     default:
       editorInsertChar(c);  // 7-23-2020:5:23pm - step 103 - We’ve now officially upgraded our text viewer to a text editor
       break;
-  }
+  }  // END: switch (c)
+
+  quit_times = QUIT_TIMES;
 }
 
 /*** init ***/
