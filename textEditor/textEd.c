@@ -476,7 +476,11 @@ void editorOpen(char *filename) {
 // saves the current text on the screen to the file with error handling
 void editorSave() {
   if (E.filename == NULL) {
-    E.filename = editorPrompt("Save as: %s");
+    E.filename = editorPrompt("Save as: %s (ESC to cancel)");
+    if (E.filename == NULL) {  // pressing ESC causes editorPrompt to return NULL
+      editorSetStatusMessage("Save aborted");
+      return;
+    }
   }
 
   int len;
@@ -729,8 +733,13 @@ char *editorPrompt(char *prompt) {  // The prompt is expected to be a format str
     editorRefreshScreen();
 
     int c = editorReadKey();  // read user input
-
-    if (c == '\r') {  // if Enter is pressed
+    if (c == DEL_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
+      if (buflen != 0) buf[--buflen] = '\0';
+    } else if (c == '\x1b') {  // escape key
+      editorSetStatusMessage("");  // erase status message asking for a file name
+      free(buf); // free the memory allocated to buf
+      return NULL;  // end loop and return without file name
+    } else if (c == '\r') {  // if Enter is pressed
       if (buflen != 0) {  // if the length of the buffer where we are storing the text is not 0 - meaning the buffer is not empty
         editorSetStatusMessage("");  // set status message back to nothing
         return buf;  // return the file name entered
