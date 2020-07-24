@@ -82,6 +82,8 @@ struct editorConfig E;
 // 888        888   T88b  "Y88888P"     888     "Y88888P"     888         888     888        8888888888 "Y8888P" 
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char *editorPrompt(char *prompt);
 
 /*** terminal ***/
 // 88888888888 8888888888 8888888b.  888b     d888 8888888 888b    888        d8888 888      
@@ -473,7 +475,9 @@ void editorOpen(char *filename) {
 // -----------------------------------------------------------------------------
 // saves the current text on the screen to the file with error handling
 void editorSave() {
-  if (E.filename == NULL) return; /* add support for prompting the user for a new filename later */
+  if (E.filename == NULL) {
+    E.filename = editorPrompt("Save as: %s");
+  }
 
   int len;
   char *buf = editorRowsToString(&len);  // converts the contents of rows array into one continuos string
@@ -709,7 +713,38 @@ void editorSetStatusMessage(const char *fmt, ...) {
 //   888   888 Y88b888 8888888P"  888     888     888     
 //   888   888  Y88888 888        888     888     888     
 //   888   888   Y8888 888        Y88b. .d88P     888     
-// 8888888 888    Y888 888         "Y88888P"      888    
+// 8888888 888    Y888 888         "Y88888P"      888       
+
+// -----------------------------------------------------------------------------
+//
+char *editorPrompt(char *prompt) {  // The prompt is expected to be a format string containing a %s, which is where the user’s input will be displayed.
+  size_t bufsize = 128;
+  char *buf = malloc(bufsize);
+
+  size_t buflen = 0;
+  buf[0] = '\0';
+
+  while (1) {  // infinite loop that repeatedly sets the status message, refreshes the screen, and waits for a keypress to handle
+    editorSetStatusMessage(prompt, buf);
+    editorRefreshScreen();
+
+    int c = editorReadKey();  // read user input
+
+    if (c == '\r') {  // if Enter is pressed
+      if (buflen != 0) {  // if the length of the buffer where we are storing the text is not 0 - meaning the buffer is not empty
+        editorSetStatusMessage("");  // set status message back to nothing
+        return buf;  // return the file name entered
+      }
+    } else if (!iscntrl(c) && c < 128) {  // Otherwise, when they input a printable character (not a control character and not a charcter value above 128 - so no characters in our editorKey enum), we append it to buf - Notice that we have to make sure the input key isn’t one of the special keys in the editorKey enum, which have high integer values. To do that, we test whether the input key is in the range of a char by making sure it is less than 128.
+      if (buflen == bufsize - 1) {    // If buflen has reached the maximum capacity we allocated (stored in bufsize) 
+        bufsize *= 2;                 // then we double bufsize
+        buf = realloc(buf, bufsize);  // and allocate that amount of memory before appending to buf
+      }
+      buf[buflen++] = c;  // add the new character just entered to buf
+      buf[buflen] = '\0';  // make sure it ends with a null character
+    }
+  }
+}
 
 // -----------------------------------------------------------------------------
 void editorMoveCursor(int key) {
