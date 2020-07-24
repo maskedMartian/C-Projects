@@ -10,16 +10,17 @@
 
 #include <ctype.h>      // needed for iscntrl()
 #include <errno.h>      // needed for errno, EAGAIN
+#include <fcntl.h>      // needed for open(), O_RDWR, O_CREAT
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup(). memmove()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
                         // IXON, OPOST, CS8, ECHO, ICANON, IEXTEN, ISIG, VMIN, VTIME
 #include <time.h>       // Needed for time_t, time()
-#include <unistd.h>     // Needed for read(), STDIN_FILENO, write(), STDOUT_FILENO
+#include <unistd.h>     // Needed for read(), STDIN_FILENO, write(), STDOUT_FILENO, ftruncate(), close()
 
 /*** defines ***/
 
@@ -67,6 +68,18 @@ struct editorConfig {
 };
 
 struct editorConfig E;
+
+/*** prototypes ***/
+// 8888888b.  8888888b.   .d88888b. 88888888888 .d88888b. 88888888888 Y88b   d88P 8888888b.  8888888888 .d8888b.  
+// 888   Y88b 888   Y88b d88P" "Y88b    888    d88P" "Y88b    888      Y88b d88P  888   Y88b 888       d88P  Y88b 
+// 888    888 888    888 888     888    888    888     888    888       Y88o88P   888    888 888       Y88b.      
+// 888   d88P 888   d88P 888     888    888    888     888    888        Y888P    888   d88P 8888888    "Y888b.   
+// 8888888P"  8888888P"  888     888    888    888     888    888         888     8888888P"  888           "Y88b. 
+// 888        888 T88b   888     888    888    888     888    888         888     888        888             "888 
+// 888        888  T88b  Y88b. .d88P    888    Y88b. .d88P    888         888     888        888       Y88b  d88P 
+// 888        888   T88b  "Y88888P"     888     "Y88888P"     888         888     888        8888888888 "Y8888P" 
+
+void editorSetStatusMessage(const char *fmt, ...);
 
 /*** terminal ***/
 // 88888888888 8888888888 8888888b.  888b     d888 8888888 888b    888        d8888 888      
@@ -332,7 +345,28 @@ void editorInsertChar(int c) {
 // 888          888   888      888               888     d88P      888     888 
 // 888          888   888      888               888    d88P       Y88b. .d88P 
 // 888        8888888 88888888 8888888888      8888888 d88P         "Y88888P"  
-                                                                                                                                                     
+                                                                                                                                                       
+// -----------------------------------------------------------------------------
+//
+char *editorRowsToString(int *buflen) {
+  int totlen = 0;
+  int j;
+  for (j = 0; j < E.numrows; j++)  // add up the lengths of each row of text, adding 1 to each one for the newline character we’ll add to the end of each line
+    totlen += E.row[j].size + 1;
+  *buflen = totlen;  // save the total length into buflen, to tell the caller how long the string is
+
+  char *buf = malloc(totlen);  // allocate the required memory for the string
+  char *p = buf;  // set p to point at the same address as buf - this is so we increase the address p is pointing to as we copy characters while leaving buf point to the beginning address
+  for (j = 0; j < E.numrows; j++) {  // loop through the rows
+    memcpy(p, E.row[j].chars, E.row[j].size);  // memcpy() the contents of each row to the end of the buffer
+    p += E.row[j].size;  // advance the address being pointed at by the p pointer by the qty of characters added to the string
+    *p = '\n';  // append a new line character after each row
+    p++;  // advance the address being pointed at by the pointer by one to account for the newline character
+  }
+
+  return buf; // return the string - we expect the caller to free the memory
+}
+
 // -----------------------------------------------------------------------------
 // for opening and reading a file from disk
 void editorOpen(char *filename) {
@@ -354,7 +388,41 @@ void editorOpen(char *filename) {
   fclose(fp);
 }
 
+// -----------------------------------------------------------------------------
+// saves the current text on the screen to the file with error handling
+void editorSave() {
+  if (E.filename == NULL) return; /* add support for prompting the user for a new filename later */
+
+  int len;
+  char *buf = editorRowsToString(&len);  // converts the contents of rows array into one continuos string
+
+  int fd = open(E.filename, O_RDWR | O_CREAT, 0644);  // create a new file if it doesn’t already exist (O_CREAT), and we want to open it for reading and writing (O_RDWR) - 0644 is the standard permissions you usually want for text files
+  if (fd != -1) {
+    if (ftruncate(fd, len) != -1) {  // sets the file’s size to the specified length
+      if (write(fd, buf, len) == len) {  // write the contents of buf to the file referenced by fd
+        close(fd);
+        free(buf);
+        editorSetStatusMessage("%d bytes written to %s", len, E.filename);
+        return;
+      }
+    }
+    close(fd);
+  }
+
+  free(buf);
+  editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+}
+
 /*** append buffer ***/
+//        d8888 8888888b.  8888888b.  8888888888 888b    888 8888888b.       888888b.   888     888 8888888888 8888888888 8888888888 8888888b.  
+//       d88888 888   Y88b 888   Y88b 888        8888b   888 888  "Y88b      888  "88b  888     888 888        888        888        888   Y88b 
+//      d88P888 888    888 888    888 888        88888b  888 888    888      888  .88P  888     888 888        888        888        888    888 
+//     d88P 888 888   d88P 888   d88P 8888888    888Y88b 888 888    888      8888888K.  888     888 8888888    8888888    8888888    888   d88P 
+//    d88P  888 8888888P"  8888888P"  888        888 Y88b888 888    888      888  "Y88b 888     888 888        888        888        8888888P"  
+//   d88P   888 888        888        888        888  Y88888 888    888      888    888 888     888 888        888        888        888 T88b   
+//  d8888888888 888        888        888        888   Y8888 888  .d88P      888   d88P Y88b. .d88P 888        888        888        888  T88b  
+// d88P     888 888        888        8888888888 888    Y888 8888888P"       8888888P"   "Y88888P"  888        888        8888888888 888   T88b 
+
 
 struct abuf {
   char *b;
@@ -616,6 +684,10 @@ void editorProcessKeypress()
       exit(0);
       break;
 
+    case CTRL_KEY('s'):
+      editorSave();
+      break;
+
     case HOME_KEY:
       E.cx = 0;
       break;
@@ -701,7 +773,7 @@ int main(int argc, char *argv[])
     editorOpen(argv[1]);
   }
 
-  editorSetStatusMessage("HELP: Ctrl-Q = quit");
+  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit");
   
   while (1) 
   {
