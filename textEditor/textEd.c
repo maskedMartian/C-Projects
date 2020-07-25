@@ -1,5 +1,22 @@
 // Small command line text editor that will run in a Linux terminal. 
 
+// Resources for this project:
+//     VT100.net VT100 User Guide, Chapter 3 Programmer Information:    https://vt100.net/docs/vt100-ug/chapter3.html
+//     Wikipedia article on ANSI escape code:                           https://en.wikipedia.org/wiki/ANSI_escape_code
+
+/*
+USING COLOR:
+The Wikipedia article on ANSI escape codes includes a large table containing all the different argument codes you can 
+use with the m command on various terminals. It also includes the ANSI color table with the 8 foreground/background 
+colors available.
+
+The first table says we can set the text color using codes 30 to 37, and reset it to the default color using 39. The 
+color table says 0 is black, 1 is red, and so on, up to 7 which is white. Putting these together, we can set the text 
+color to red using 31 as an argument to the m command. After printing the digit, we use 39 as an argument to m to set 
+the text color back to normal.
+
+*/
+
 // Small changes
 
 /*** includes ***/
@@ -691,7 +708,17 @@ void editorDrawRows(struct abuf *ab)
       int len = E.row[filerow].rsize - E.coloff;
       if (len < 0) len = 0;
       if (len > E.screencols) len = E.screencols;
-      abAppend(ab, &E.row[filerow].render[E.coloff], len);
+      char *c = &E.row[filerow].render[E.coloff];
+      int j;
+      for (j = 0; j < len; j++) {
+        if (isdigit(c[j])) {
+          abAppend(ab, "\x1b[31m", 5);
+          abAppend(ab, &c[j], 1);
+          abAppend(ab, "\x1b[39m", 5);
+        } else {
+          abAppend(ab, &c[j], 1);
+        }
+      }
     }
 
     abAppend(ab, "\x1b[K", 3);  // append a 3-byte escape sequence which erases the line right of the cursor
