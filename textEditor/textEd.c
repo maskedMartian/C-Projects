@@ -600,6 +600,15 @@ void editorFindCallback(char *query, int key) {
   static int last_match = -1;
   static int direction = 1;
 
+  static int saved_hl_line;  // static variable to know which line’s hl needs to be restored
+  static char *saved_hl = NULL;  // dynamically allocated array which points to NULL when there is nothing to restore
+
+  if (saved_hl) {  // if there is something to restore
+    memcpy(E.row[saved_hl_line].hl, saved_hl, E.row[saved_hl_line].rsize);  // memcpy it to the saved line’s hl
+    free(saved_hl);  // deallocate saved_hl
+    saved_hl = NULL;  // set it back to NULL - so we won't have a dangling pointer
+  }
+
   if (key == '\r' || key == '\x1b') {  // check if the user pressed Enter or Escape
     last_match = -1;  // return to defaults - no last match
     direction = 1;  // return to defaults - forward search
@@ -630,6 +639,9 @@ void editorFindCallback(char *query, int key) {
       E.cx = editorRowRxToCx(row, match - row->render); // set cursor to location of the match converted from a render index to a chars index
       E.rowoff = E.numrows;  // scroll the text row where the match was found to the top of the screen -  set E.rowoff so that we are scrolled to the very bottom of the file, which will cause editorScroll() to scroll upwards at the next screen refresh so that the matching line will be at the very top of the screen
       
+      saved_hl_line = current;
+      saved_hl = malloc(row->rsize);
+      memcpy(saved_hl, row->hl, row->rsize);
       memset(&row->hl[match - row->render], HL_MATCH, strlen(query));
       break;
     }
