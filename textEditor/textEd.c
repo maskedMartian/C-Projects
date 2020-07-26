@@ -31,7 +31,7 @@ the text color back to normal.
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -61,6 +61,11 @@ enum editorKey {
   PAGE_DOWN
 };
 
+enum editorHighlight {  // enum of highlight colors
+  HL_NORMAL = 0,
+  HL_NUMBER
+};
+
 /*** data ***/
 
 typedef struct erow {  // the typedef lets us refer to the type as "erow" instead of "struct erow"
@@ -68,6 +73,7 @@ typedef struct erow {  // the typedef lets us refer to the type as "erow" instea
   int rsize;  // the quantity of elements in the *render array
   char *chars;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
   char *render;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
+  unsigned char *hl;  // "highlight" - an array to store the highlighting characteristics of each character
 } erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
 
 struct editorConfig {
@@ -259,6 +265,41 @@ int getWindowSize(int *rows, int *cols)
   }
 }
 
+/*** syntax highlighting ***/
+// 888    888 8888888 .d8888b.  888    888 888      8888888 .d8888b.  888    888 88888888888 
+// 888    888   888  d88P  Y88b 888    888 888        888  d88P  Y88b 888    888     888     
+// 888    888   888  888    888 888    888 888        888  888    888 888    888     888     
+// 8888888888   888  888        8888888888 888        888  888        8888888888     888     
+// 888    888   888  888  88888 888    888 888        888  888  88888 888    888     888     
+// 888    888   888  888    888 888    888 888        888  888    888 888    888     888     
+// 888    888   888  Y88b  d88P 888    888 888        888  Y88b  d88P 888    888     888     
+// 888    888 8888888 "Y8888P88 888    888 88888888 8888888 "Y8888P88 888    888     888   
+
+
+// -----------------------------------------------------------------------------
+//
+void editorUpdateSyntax(erow *row) {
+  row->hl = realloc(row->hl, row->rsize);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
+  memset(row->hl, HL_NORMAL, row->rsize);  // use memset() to set all characters to HL_NORMAL by default
+
+  int i;
+  for (i = 0; i < row->size; i++) {  // loop through the characters
+    if (isdigit(row->render[i])) {
+      row->hl[i] = HL_NUMBER;        // set the digits to HL_NUMBER
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+//
+int editorSyntaxToColor(int hl) {
+  switch (hl) {
+    case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
+    default: return 37;         // return the ANSI code for "foreground white"
+  }
+}
+
+
 /*** row operations ***/
 // 8888888b.   .d88888b.  888       888       .d88888b.  8888888b.  8888888888 8888888b.         d8888 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
 // 888   Y88b d88P" "Y88b 888   o   888      d88P" "Y88b 888   Y88b 888        888   Y88b       d88888     888       888  d88P" "Y88b 8888b   888 d88P  Y88b 
@@ -320,6 +361,8 @@ void editorUpdateRow(erow *row) {
   }
   row->render[idx] = '\0';
   row->rsize = idx;
+
+  editorUpdateSyntax(row);
 }
 
 // -----------------------------------------------------------------------------
@@ -337,6 +380,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   E.row[at].rsize = 0;
   E.row[at].render = NULL;
+  E.row[at].hl = NULL;
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
@@ -348,6 +392,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 void editorFreeRow(erow *row) {
   free(row->render);
   free(row->chars);
+  free(row->hl);
 }
 
 // -----------------------------------------------------------------------------
@@ -681,8 +726,7 @@ void editorScroll() {
 
 // -----------------------------------------------------------------------------
 // draws a tilde on every row of the terminal just like Vim
-void editorDrawRows(struct abuf *ab)
-{
+void editorDrawRows(struct abuf *ab) {
   int y;
   for (y = 0; y < E.screenrows; y++) {
     int filerow = y + E.rowoff; // To get the row of the file that we want to display at each y position, we add E.rowoff to the y position.
@@ -709,16 +753,21 @@ void editorDrawRows(struct abuf *ab)
       if (len < 0) len = 0;
       if (len > E.screencols) len = E.screencols;
       char *c = &E.row[filerow].render[E.coloff];
+      unsigned char *hl = &E.row[filerow].hl[E.coloff];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of render that we are printing
       int j;
-      for (j = 0; j < len; j++) {
-        if (isdigit(c[j])) {
-          abAppend(ab, "\x1b[31m", 5);
-          abAppend(ab, &c[j], 1);
-          abAppend(ab, "\x1b[39m", 5);
-        } else {
+      for (j = 0; j < len; j++) {  // for every character 
+        if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
+          abAppend(ab, "\x1b[39m", 5);  // append an escaspe sequence for NORMAL coloring
+          abAppend(ab, &c[j], 1);  // append the character
+        } else {  // if the character does not get normal highlighting 
+          int color = editorSyntaxToColor(hl[j]);  // get color to highlight
+          char buf[16];
+          int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+          abAppend(ab, buf, clen);  
           abAppend(ab, &c[j], 1);
         }
       }
+      abAppend(ab, "\x1b[39m", 5);  // after we’re done looping through all the characters and displaying them, we print a final <esc>[39m escape sequence to make sure the text color is reset to default
     }
 
     abAppend(ab, "\x1b[K", 3);  // append a 3-byte escape sequence which erases the line right of the cursor
