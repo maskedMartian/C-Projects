@@ -63,7 +63,8 @@ enum editorKey {
 
 enum editorHighlight {  // enum of highlight colors
   HL_NORMAL = 0,
-  HL_NUMBER
+  HL_NUMBER,
+  HL_MATCH
 };
 
 /*** data ***/
@@ -295,6 +296,7 @@ void editorUpdateSyntax(erow *row) {
 int editorSyntaxToColor(int hl) {
   switch (hl) {
     case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
+    case HL_MATCH: return 34;   // return the ANSI code for "foreground blue"
     default: return 37;         // return the ANSI code for "foreground white"
   }
 }
@@ -627,6 +629,8 @@ void editorFindCallback(char *query, int key) {
       E.cy = current;  // set cursor to location of the match
       E.cx = editorRowRxToCx(row, match - row->render); // set cursor to location of the match converted from a render index to a chars index
       E.rowoff = E.numrows;  // scroll the text row where the match was found to the top of the screen -  set E.rowoff so that we are scrolled to the very bottom of the file, which will cause editorScroll() to scroll upwards at the next screen refresh so that the matching line will be at the very top of the screen
+      
+      memset(&row->hl[match - row->render], HL_MATCH, strlen(query));
       break;
     }
   }
