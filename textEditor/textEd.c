@@ -754,16 +754,23 @@ void editorDrawRows(struct abuf *ab) {
       if (len > E.screencols) len = E.screencols;
       char *c = &E.row[filerow].render[E.coloff];
       unsigned char *hl = &E.row[filerow].hl[E.coloff];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of render that we are printing
+      int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {  // for every character 
         if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
-          abAppend(ab, "\x1b[39m", 5);  // append an escaspe sequence for NORMAL coloring
+          if (current_color != -1) {
+            abAppend(ab, "\x1b[39m", 5);  // append an escaspe sequence for NORMAL coloring
+            current_color = -1;
+          }
           abAppend(ab, &c[j], 1);  // append the character
         } else {  // if the character does not get normal highlighting 
           int color = editorSyntaxToColor(hl[j]);  // get color to highlight
-          char buf[16];
-          int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
-          abAppend(ab, buf, clen);  
+          if (color != current_color) {
+            current_color = color;
+            char buf[16];
+            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+            abAppend(ab, buf, clen);
+          }  
           abAppend(ab, &c[j], 1);
         }
       }
