@@ -279,29 +279,40 @@ int getWindowSize(int *rows, int *cols)
 /*** syntax highlighting ***/
 
 // -----------------------------------------------------------------------------
-//
+// Right now, numbers are highlighted even if they’re part of an identifier, such as the 32 in int32_t. To fix that, we’ll require that 
+//numbers are preceded by a separator character, which includes whitespace or punctuation characters. We also include the null byte ('\0'),
+// because then we can count the null byte at the end of each line as a separator, which will make some of our code simpler in the future.
 int is_separator(int c) {  // this function should be type Boolean 
   return isspace(c) || c == '\0' || strchr(",.()+-/*=~%<>{}:", c) != NULL;  
   // these are ALL boolean conditions
 }
 
 // -----------------------------------------------------------------------------
-//
+// Might not need int prev_sep - maybe just use function? OR maybe keep track of what type of char the prev char was - not just separartor, but number, or other too???
 void editorUpdateSyntax(erow *row) {
   row->hl = realloc(row->hl, row->rsize);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
   memset(row->hl, HL_NORMAL, row->rsize);  // use memset() to set all characters to HL_NORMAL by default
-
+  // make this a boolean
+  int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
+                     // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
   int i = 0;
   while (i < row->size) {  // loop through the characters
     char c = row->render[i];
+    unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
 
-    if (isdigit(c)) {
+    // right now this will highlight all periods in 3.....4 - do I want it to do that?
+    if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
+        (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
       row->hl[i] = HL_NUMBER;  // set the digits to HL_NUMBER
+      i++; // increment I since we are continuing the loop
+      prev_sep = 0;  // reset prev_sep since the current char is not a separator
+      continue;
     }
-
-    i++;
+  
+    prev_sep = is_separator(c);  // current character is not a number - set prev_sep
+    i++;  // increment I since we didn't continue the loop
   }
-}
+}  // rework this without the continue and remove the second incrementation of i
 
 // -----------------------------------------------------------------------------
 //
