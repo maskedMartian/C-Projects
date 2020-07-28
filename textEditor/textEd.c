@@ -31,7 +31,7 @@ the text color back to normal.
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset(), strchr()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -266,7 +266,7 @@ int getWindowSize(int *rows, int *cols)
   }
 }
 
-/*** syntax highlighting ***/
+
 // 888    888 8888888 .d8888b.  888    888 888      8888888 .d8888b.  888    888 88888888888 
 // 888    888   888  d88P  Y88b 888    888 888        888  d88P  Y88b 888    888     888     
 // 888    888   888  888    888 888    888 888        888  888    888 888    888     888     
@@ -276,6 +276,14 @@ int getWindowSize(int *rows, int *cols)
 // 888    888   888  Y88b  d88P 888    888 888        888  Y88b  d88P 888    888     888     
 // 888    888 8888888 "Y8888P88 888    888 88888888 8888888 "Y8888P88 888    888     888   
 
+/*** syntax highlighting ***/
+
+// -----------------------------------------------------------------------------
+//
+int is_separator(int c) {  // this function should be type Boolean 
+  return isspace(c) || c == '\0' || strchr(",.()+-/*=~%<>{}:", c) != NULL;  
+  // these are ALL boolean conditions
+}
 
 // -----------------------------------------------------------------------------
 //
@@ -283,11 +291,15 @@ void editorUpdateSyntax(erow *row) {
   row->hl = realloc(row->hl, row->rsize);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
   memset(row->hl, HL_NORMAL, row->rsize);  // use memset() to set all characters to HL_NORMAL by default
 
-  int i;
-  for (i = 0; i < row->size; i++) {  // loop through the characters
-    if (isdigit(row->render[i])) {
-      row->hl[i] = HL_NUMBER;        // set the digits to HL_NUMBER
+  int i = 0;
+  while (i < row->size) {  // loop through the characters
+    char c = row->render[i];
+
+    if (isdigit(c)) {
+      row->hl[i] = HL_NUMBER;  // set the digits to HL_NUMBER
     }
+
+    i++;
   }
 }
 
