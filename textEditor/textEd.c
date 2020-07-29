@@ -67,7 +67,15 @@ enum editorHighlight {  // enum of highlight colors
   HL_MATCH
 };
 
+#define HL_HIGHLIGHT_NUMBER (1<<0)  // For now, we define just the HL_HIGHLIGHT_NUMBERS flag bit.
+
 /*** data ***/
+
+struct editorSyntax {
+  char *filetype;    // the name of the filetype that will be displayed to the user in the status bar
+  char **filematch;  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
+  int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
+};
 
 typedef struct erow {  // the typedef lets us refer to the type as "erow" instead of "struct erow"
   int size;  // the quantity of elements in the *chars array
@@ -77,7 +85,7 @@ typedef struct erow {  // the typedef lets us refer to the type as "erow" instea
   unsigned char *hl;  // "highlight" - an array to store the highlighting characteristics of each character
 } erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
 
-struct editorConfig {
+struct editorConfig {  // global editor state
   int cx, cy;  // cx - horizontal index into the chars field of erow (cursor location???)
   int rx;  //horizontal index into the render field of erow - if there are no tab son the current line, rx will be the same as cx 
   int rowoff;  // row offset - keeps track of what row of the file the user is currently scrolled to
@@ -90,10 +98,25 @@ struct editorConfig {
   char *filename;  // Name of the file being edited
   char statusmsg[80];  // holds an 80 character message to the user displayed on the status bar.
   time_t statusmsg_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
+  struct editorSyntax *syntax;  // a pointer to the current editorSyntax struct in the global editor state
   struct termios orig_termios;  // structure to hold the original state of the terminal when our program began, before we started altering its state
 };
 
 struct editorConfig E;
+
+/*** filetypes ***/
+
+char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
+
+struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it's an array of editorSyntax structs
+  {
+    "c",  // filetype field
+    C_HL_extensions,  // filematch field
+    HL_HIGHLIGHT_NUMBER  // flags field
+  },
+};
+
+#define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))  // define an HLDB_ENTRIES constant to store the length of the HLDB array
 
 /*** prototypes ***/
 // 8888888b.  8888888b.   .d88888b. 88888888888 .d88888b. 88888888888 Y88b   d88P 8888888b.  8888888888 .d8888b.  
@@ -835,8 +858,8 @@ void editorDrawStatusBar(struct abuf *ab) {
   int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
     E.filename ? E.filename : "[No Name]", E.numrows, 
     E.dirty ? "(modified)" : "");
-  int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
-    E.cy + 1, E.numrows);
+  int rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d/%d",
+    E.syntax ? E.syntax->filetype : "no filetype", E.cy + 1, E.numrows);  // prints file type (or no filetype) and current line as well as total lines
   if (len > E.screencols) len = E.screencols;
   abAppend(ab, status, len);
   while (len < E.screencols) {
@@ -1116,6 +1139,7 @@ void initEditor() {
   E.filename = NULL;
   E.statusmsg[0] = '\0';
   E.statusmsg_time = 0;
+  E.syntax = NULL;  // When E.syntax is NULL, that means there is no filetype for the current file, and no syntax highlighting should be done
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
   E.screenrows -= 2;
