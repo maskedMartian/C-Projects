@@ -31,7 +31,7 @@ the text color back to normal.
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset(), strchr()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset(), strchr(), strcmp()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -315,6 +315,9 @@ int is_separator(int c) {  // this function should be type Boolean
 void editorUpdateSyntax(erow *row) {
   row->hl = realloc(row->hl, row->rsize);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
   memset(row->hl, HL_NORMAL, row->rsize);  // use memset() to set all characters to HL_NORMAL by default
+
+  if (E.syntax == NULL) return;
+
   // make this a boolean
   int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
                      // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
@@ -323,15 +326,17 @@ void editorUpdateSyntax(erow *row) {
     char c = row->render[i];
     unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
 
-    // right now this will highlight all periods in 3.....4 - do I want it to do that?
-    if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
-        (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
-      row->hl[i] = HL_NUMBER;  // set the digits to HL_NUMBER
-      i++; // increment I since we are continuing the loop
-      prev_sep = 0;  // reset prev_sep since the current char is not a separator
-      continue;
+    if (E.syntax->flags & HL_HIGHLIGHT_NUMBER) {
+      // right now this will highlight all periods in 3.....4 - do I want it to do that?
+      if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
+          (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
+        row->hl[i] = HL_NUMBER;  // set the digits to HL_NUMBER
+        i++; // increment I since we are continuing the loop
+        prev_sep = 0;  // reset prev_sep since the current char is not a separator
+        continue;
+      }
     }
-  
+
     prev_sep = is_separator(c);  // current character is not a number - set prev_sep
     i++;  // increment I since we didn't continue the loop
   }
@@ -347,6 +352,37 @@ int editorSyntaxToColor(int hl) {
   }
 }
 
+// -----------------------------------------------------------------------------
+// we loop through each editorSyntax struct in the HLDB array, and for each one of those, we loop through each pattern in its filematch 
+// array. If the pattern starts with a ., then it’s a file extension pattern, and we use strcmp() to see if the filename ends with that 
+// extension. If it’s not a file extension pattern, then we just check to see if the pattern exists anywhere in the filename, using 
+// strstr(). If the filename matched according to those rules, then we set E.syntax to the current editorSyntax struct, and return.
+void editorSelectSyntaxHighlight() {
+  E.syntax = NULL;  // set E.syntax to NULL, so that if nothing matches or if there is no filename, then there is no filetype
+  if (E.filename == NULL) return;
+
+  char *ext = strrchr(E.filename, '.');  // ext = extension - strrchr() returns a pointer to the last occurrence of a character in a string (so we can look at just the file extention) - if there is no extension, then ext will be NULL
+
+  for (unsigned int j = 0; j <HLDB_ENTRIES; j++) {  // loop  through each editorSyntax struct in the HLDB array
+    struct editorSyntax *s = &HLDB[j];
+    unsigned int i = 0;
+    while (s->filematch[i]) {  // loop through each pattern in its filematch array
+      int is_ext = (s->filematch[i][0] == '.');
+      if ((is_ext && ext && !strcmp(ext, s->filematch[i])) ||   // strcmp() returns 0 if two given strings are equal
+          (!is_ext && strstr(E.filename, s->filematch[i]))) { 
+        E.syntax = s;
+
+        int filerow;
+        for (filerow = 0; filerow < E.numrows; filerow++) {
+          editorUpdateSyntax(&E.row[filerow]);
+        }
+
+        return;
+      }
+      i++;
+    }
+  }
+}
 
 /*** row operations ***/
 // 8888888b.   .d88888b.  888       888       .d88888b.  8888888b.  8888888888 8888888b.         d8888 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
@@ -581,6 +617,9 @@ char *editorRowsToString(int *buflen) {
 void editorOpen(char *filename) {
   free(E.filename);
   E.filename = strdup(filename);
+
+  editorSelectSyntaxHighlight();
+
   FILE *fp = fopen(filename, "r");
   if (!fp) die("fopen");
 
@@ -607,6 +646,7 @@ void editorSave() {
       editorSetStatusMessage("Save aborted");
       return;
     }
+    editorSelectSyntaxHighlight();
   }
 
   int len;
