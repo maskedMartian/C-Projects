@@ -31,7 +31,7 @@ the text color back to normal.
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset(), strchr(), strcmp()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset(), strchr(), strcmp(), strncmp()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -63,17 +63,21 @@ enum editorKey {
 
 enum editorHighlight {  // enum of highlight colors
   HL_NORMAL = 0,
+  HL_COMMENT,
+  HL_STRING,
   HL_NUMBER,
   HL_MATCH
 };
 
-#define HL_HIGHLIGHT_NUMBER (1<<0)  // For now, we define just the HL_HIGHLIGHT_NUMBERS flag bit.
+#define HL_HIGHLIGHT_NUMBERS  (1<<0)  // For now, we define just the HL_HIGHLIGHT_NUMBERS flag bit.
+#define HL_HIGHLIGHT_STRINGS  (1<<1)  // Now let’s add an HL_HIGHLIGHT_STRINGS bit flag to the flags field of the editorSyntax struct, and turn on the flag when highlighting C files.
 
 /*** data ***/
 
 struct editorSyntax {
   char *filetype;    // the name of the filetype that will be displayed to the user in the status bar
   char **filematch;  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
+  char *singleline_comment_start;  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a singleline_comment_start string to the editorSyntax struct, and set it to "//" for the C filetype. 
   int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
 };
 
@@ -112,7 +116,8 @@ struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it
   {
     "c",  // filetype field
     C_HL_extensions,  // filematch field
-    HL_HIGHLIGHT_NUMBER  // flags field
+    "//",  // singleline_comment_ start field
+    HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS  // flags field
   },
 };
 
@@ -318,15 +323,53 @@ void editorUpdateSyntax(erow *row) {
 
   if (E.syntax == NULL) return;
 
+  // If you don’t want single-line comment highlighting for a particular filetype, you should be able to set singleline_comment_start either to NULL or to the empty string ("")
+  char *scs = E.syntax->singleline_comment_start;  // We make scs an alias for E.syntax->singleline_comment_start for easier typing (and readability, perhaps?)
+  int scs_len = scs ? strlen(scs) : 0;  // We then set scs_len to the length of the string, or 0 if the string is NULL. This lets us use scs_len as a boolean to know whether we should highlight single-line comments
+
   // make this a boolean
   int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
                      // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
+  int in_string = 0;  // keep track of whether we are currently inside a string
+
   int i = 0;
   while (i < row->size) {  // loop through the characters
     char c = row->render[i];
     unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
 
-    if (E.syntax->flags & HL_HIGHLIGHT_NUMBER) {
+    if (scs_len && !in_string) {  // So we wrap our comment highlighting code in an if statement that checks scs_len and also makes sure we’re not in a string, since we’re placing this code above the string highlighting code (order matters a lot in this function)
+      if (!strncmp(&row->render[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
+        memset(&row->hl[i], HL_COMMENT, row->rsize - i);  // simply memset() the whole rest of the line with HL_COMMENT
+        break;  // break out of the syntax highlighting loop
+      }
+    }
+
+    // We will use an in_string variable to keep track of whether we are currently inside a string. If we are, then we’ll keep 
+    // highlighting the current character as a string until we hit the closing quote.
+    if (E.syntax->flags & HL_HIGHLIGHT_STRINGS) {
+      if (in_string) {
+        row->hl[i] = HL_STRING;
+        if (c == '\\' && i + 1 < row->rsize) {  // If we’re in a string and the current character is a backslash (\), and there’s at least one more character in that line that comes after the backslash, then we highlight the character that comes after the backslash with HL_STRING and consume it. We increment i by 2 to consume both characters at once.
+          row->hl[i + 1] = HL_STRING;
+          i += 2;
+          continue;
+        }
+        if (c == in_string) in_string = 0;  // if the string closes
+        i++;
+        prev_sep = 1;
+        continue;
+      } else {
+        if (c == '"' || c == '\'') {  // if a string opens -  we highlight both double-quoted strings and single-quoted strings
+          in_string = c;  // store the character so we know what the closing character will be - single or double quotes
+          row->hl[i] = HL_STRING;
+          i++;
+          continue;
+        }
+      }
+    }
+
+
+    if (E.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
       // right now this will highlight all periods in 3.....4 - do I want it to do that?
       if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
           (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
@@ -346,6 +389,8 @@ void editorUpdateSyntax(erow *row) {
 //
 int editorSyntaxToColor(int hl) {
   switch (hl) {
+    case HL_COMMENT: return 36; // return the ANSI code for "foreground cyan"
+    case HL_STRING: return 35;  // return the ANSI code for "foreground magenta"
     case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
     case HL_MATCH: return 34;   // return the ANSI code for "foreground blue"
     default: return 37;         // return the ANSI code for "foreground white"
