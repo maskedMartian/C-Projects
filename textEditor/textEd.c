@@ -64,6 +64,8 @@ enum editorKey {
 enum editorHighlight {  // enum of highlight colors
   HL_NORMAL = 0,
   HL_COMMENT,
+  HL_KEYWORD1,
+  HL_KEYWORD2,
   HL_STRING,
   HL_NUMBER,
   HL_MATCH
@@ -77,6 +79,7 @@ enum editorHighlight {  // enum of highlight colors
 struct editorSyntax {
   char *filetype;    // the name of the filetype that will be displayed to the user in the status bar
   char **filematch;  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
+  char **keywords;  // an array of strings to hold programming language keywords
   char *singleline_comment_start;  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a singleline_comment_start string to the editorSyntax struct, and set it to "//" for the C filetype. 
   int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
 };
@@ -111,11 +114,19 @@ struct editorConfig E;
 /*** filetypes ***/
 
 char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
+char *C_HL_keywords[] = {
+  "switch", "if", "while", "for", "break", "continue", "return", "else",
+  "struct", "union", "typedef", "static", "enum", "class", "case",
+
+  "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",  // type keywords are each ended with a | character and treated as secondary keywords
+  "void|", NULL
+};
 
 struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it's an array of editorSyntax structs
   {
     "c",  // filetype field
     C_HL_extensions,  // filematch field
+    C_HL_keywords,   // keywords field
     "//",  // singleline_comment_ start field
     HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS  // flags field
   },
@@ -323,6 +334,8 @@ void editorUpdateSyntax(erow *row) {
 
   if (E.syntax == NULL) return;
 
+  char **keywords = E.syntax->keywords;  // declare an array of strings (pointer to a pointer) and point it at the keywords array in the E.syntax struct
+
   // If you don’t want single-line comment highlighting for a particular filetype, you should be able to set singleline_comment_start either to NULL or to the empty string ("")
   char *scs = E.syntax->singleline_comment_start;  // We make scs an alias for E.syntax->singleline_comment_start for easier typing (and readability, perhaps?)
   int scs_len = scs ? strlen(scs) : 0;  // We then set scs_len to the length of the string, or 0 if the string is NULL. This lets us use scs_len as a boolean to know whether we should highlight single-line comments
@@ -380,8 +393,29 @@ void editorUpdateSyntax(erow *row) {
       }
     }
 
+    // keywords require a separator both before and after the keyword - Otherwise, the void in avoid, voided, or avoidable would be highlighted as a keyword, which is definitely a problem we want to, uh, circumnavigate.
+    if (prev_sep) {  // check for previous separator character
+      int j;
+      for (j = 0; keywords[j]; j++) {  // for each element in the keywords array - we can use a foreach type array because the last element is holdding NULL as a value
+        int klen = strlen(keywords[j]);  // length of the keyword at position j in the array
+        int kw2 = keywords[j][klen - 1] == '|';  // if the last character of the keyword is a pipe 
+        if (kw2) klen--;  // if the last character is a pipe, decrement length by one
+
+        if (!strncmp(&row->render[i], keywords[j], klen) &&  // if the word in the render array matches the current keyword being checked  
+            is_separator(row->render[i + klen])) {  // if the character after the keyword in the render array is a separator
+          memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);  // use memeset to set the correct number (length of keyword) of bytes in the hl array to the correct highlight color
+        i += klen;  // consume all the characters of the keyword
+        break;  // end the for loop once a keyword has been found and highlighted
+        }
+      }
+      if (keywords[j] != NULL) {  // if we have not reached the last element of the keywords array - the for loop was exited early by break
+        prev_sep = 0;  // previous character is not a seperator
+        continue;  // continue main while loop
+      }
+    }
+
     prev_sep = is_separator(c);  // current character is not a number - set prev_sep
-    i++;  // increment I since we didn't continue the loop
+    i++;  // increment i since we didn't continue the loop
   }
 }  // rework this without the continue and remove the second incrementation of i
 
@@ -390,6 +424,8 @@ void editorUpdateSyntax(erow *row) {
 int editorSyntaxToColor(int hl) {
   switch (hl) {
     case HL_COMMENT: return 36; // return the ANSI code for "foreground cyan"
+    case HL_KEYWORD1: return 33;  // return the ANSI code for "foreground yellow"
+    case HL_KEYWORD2: return 32;  // return the ANSI code for "foreground green"
     case HL_STRING: return 35;  // return the ANSI code for "foreground magenta"
     case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
     case HL_MATCH: return 34;   // return the ANSI code for "foreground blue"
