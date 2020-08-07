@@ -940,7 +940,17 @@ void editorDrawRows(struct abuf *ab) {
       int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {  // for every character 
-        if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
+        if (iscntrl(c[j])) {  // We use iscntrl() to check if the current character is a control character. 
+          char sym = (c[j] <= 26) ? '@' + c[j] : '?';  // If so, we translate it into a printable character by adding its value to '@' (in ASCII, the capital letters of the alphabet come after the @ character), or using the '?' character if it’s not in the alphabetic range.
+          abAppend(ab, "\x1b[7m", 4);  // use the <esc>[7m escape sequence to switch to inverted colors
+          abAppend(ab, &sym, 1);  // add new symbol we just created to the buffer
+          abAppend(ab, "\x1b[m", 3); //  use <esc>[m to turn off inverted colors - Unfortunately, <esc>[m turns off all text formatting, including colors. So let’s print the escape sequence for the current color afterwards.
+          if (current_color != -1) {
+            char buf[16];
+            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);  // clen is c length
+            abAppend(ab, buf, clen);
+          }
+        } else if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
           if (current_color != -1) {
             abAppend(ab, "\x1b[39m", 5);  // append an escaspe sequence for NORMAL coloring
             current_color = -1;
