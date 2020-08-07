@@ -64,6 +64,7 @@ enum editorKey {
 enum editorHighlight {  // enum of highlight colors
   HL_NORMAL = 0,
   HL_COMMENT,
+  HL_MLCOMMENT,
   HL_KEYWORD1,
   HL_KEYWORD2,
   HL_STRING,
@@ -81,6 +82,8 @@ struct editorSyntax {
   char **filematch;  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
   char **keywords;  // an array of strings to hold programming language keywords
   char *singleline_comment_start;  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a singleline_comment_start string to the editorSyntax struct, and set it to "//" for the C filetype. 
+  char *multiline_comment_start;
+  char *multiline_comment_end;
   int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
 };
 
@@ -128,6 +131,8 @@ struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it
     C_HL_extensions,  // filematch field
     C_HL_keywords,   // keywords field
     "//",  // singleline_comment_ start field
+    "/*",
+    "*/",
     HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS  // flags field
   },
 };
@@ -338,12 +343,18 @@ void editorUpdateSyntax(erow *row) {
 
   // If you don’t want single-line comment highlighting for a particular filetype, you should be able to set singleline_comment_start either to NULL or to the empty string ("")
   char *scs = E.syntax->singleline_comment_start;  // We make scs an alias for E.syntax->singleline_comment_start for easier typing (and readability, perhaps?)
+  char *mcs = E.syntax->multiline_comment_start;
+  char *mce = E.syntax->multiline_comment_end;
+
   int scs_len = scs ? strlen(scs) : 0;  // We then set scs_len to the length of the string, or 0 if the string is NULL. This lets us use scs_len as a boolean to know whether we should highlight single-line comments
+  int mcs_len = mcs ? strlen(mcs) : 0;
+  int mce_len = mce ? strlen(mce) : 0;
 
   // make this a boolean
   int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
                      // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
   int in_string = 0;  // keep track of whether we are currently inside a string
+  int in_comment = 0;
 
   int i = 0;
   while (i < row->size) {  // loop through the characters
@@ -354,6 +365,33 @@ void editorUpdateSyntax(erow *row) {
       if (!strncmp(&row->render[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
         memset(&row->hl[i], HL_COMMENT, row->rsize - i);  // simply memset() the whole rest of the line with HL_COMMENT
         break;  // break out of the syntax highlighting loop
+      }
+    }
+
+/*   First we add an in_comment boolean variable to keep track of whether we’re currently inside a multi-line comment (this variable isn’t used for single-line comments).
+Moving down into the while loop, we require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting. We also check to make sure we’re not in a string, because having (/ *) inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages.
+If we’re currently in a multi-line comment, then we can safely highlight the current character with HL_MLCOMMENT. Then we check if we’re at the end of a multi-line comment by using strncmp() with mce. If so, we use memset() to highlight the whole mce string with HL_MLCOMMENT, and then we consume it. If we’re not at the end of the comment, we simply consume the current character which we already highlighted.
+If we’re not currently in a multi-line comment, then we use strncmp() with mcs to check if we’re at the beginning of a multi-line comment. If so, we use memset() to highlight the whole mcs string with HL_MLCOMMENT, set in_comment to true, and consume the whole mcs string.
+*/ 
+    // code for highlighting /* C */ style comments
+    if (mcs_len && mce_len && !in_string) {
+      if (in_comment) {
+        row->hl[i] = HL_MLCOMMENT;
+        if (!strncmp(&row->render[i], mce, mce_len)) {
+          memset(&row->hl[i], HL_MLCOMMENT, mce_len);
+          i += mce_len;
+          in_comment = 0;
+          prev_sep = 1;
+          continue;
+        } else {
+          i++;
+          continue;
+        }
+      } else if (!strncmp(&row->render[i], mcs, mcs_len)) {
+        memset(&row->hl[i], HL_MLCOMMENT, mcs_len);
+        i += mcs_len;
+        in_comment = 1;
+        continue;
       }
     }
 
@@ -423,7 +461,8 @@ void editorUpdateSyntax(erow *row) {
 //
 int editorSyntaxToColor(int hl) {
   switch (hl) {
-    case HL_COMMENT: return 36; // return the ANSI code for "foreground cyan"
+    case HL_COMMENT: 
+    case HL_MLCOMMENT: return 36; // return the ANSI code for "foreground cyan"
     case HL_KEYWORD1: return 33;  // return the ANSI code for "foreground yellow"
     case HL_KEYWORD2: return 32;  // return the ANSI code for "foreground green"
     case HL_STRING: return 35;  // return the ANSI code for "foreground magenta"
