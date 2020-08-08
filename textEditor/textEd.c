@@ -88,11 +88,13 @@ struct editorSyntax {
 };
 
 typedef struct erow {  // the typedef lets us refer to the type as "erow" instead of "struct erow"
+  int index;
   int size;  // the quantity of elements in the *chars array
   int rsize;  // the quantity of elements in the *render array
   char *chars;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
   char *render;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
   unsigned char *hl;  // "highlight" - an array to store the highlighting characteristics of each character
+  int hl_open_comment;  // variable type/name should be BOOLEAN hasUnclosedMultilineComment 
 } erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
 
 struct editorConfig {  // global editor state
@@ -354,14 +356,14 @@ void editorUpdateSyntax(erow *row) {
   int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
                      // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
   int in_string = 0;  // keep track of whether we are currently inside a string
-  int in_comment = 0;
+  int in_comment = (row->index > 0 && E.row[row->index - 1].hl_open_comment);  // initialize in_comment to true if the previous row has an unclosed multi-line comment
 
   int i = 0;
   while (i < row->size) {  // loop through the characters
     char c = row->render[i];
     unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
 
-    if (scs_len && !in_string) {  // So we wrap our comment highlighting code in an if statement that checks scs_len and also makes sure we’re not in a string, since we’re placing this code above the string highlighting code (order matters a lot in this function)
+    if (scs_len && !in_string && !in_comment) {  // So we wrap our comment highlighting code in an if statement that checks scs_len and also makes sure we’re not in a string and not in a multiline comment, since we’re placing this code above the string highlighting code (order matters a lot in this function)
       if (!strncmp(&row->render[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
         memset(&row->hl[i], HL_COMMENT, row->rsize - i);  // simply memset() the whole rest of the line with HL_COMMENT
         break;  // break out of the syntax highlighting loop
@@ -374,24 +376,24 @@ If we’re currently in a multi-line comment, then we can safely highlight the c
 If we’re not currently in a multi-line comment, then we use strncmp() with mcs to check if we’re at the beginning of a multi-line comment. If so, we use memset() to highlight the whole mcs string with HL_MLCOMMENT, set in_comment to true, and consume the whole mcs string.
 */ 
     // code for highlighting /* C */ style comments
-    if (mcs_len && mce_len && !in_string) {
-      if (in_comment) {
-        row->hl[i] = HL_MLCOMMENT;
-        if (!strncmp(&row->render[i], mce, mce_len)) {
-          memset(&row->hl[i], HL_MLCOMMENT, mce_len);
-          i += mce_len;
-          in_comment = 0;
-          prev_sep = 1;
-          continue;
-        } else {
-          i++;
-          continue;
+    if (mcs_len && mce_len && !in_string) {  // require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting - check to make sure we’re not in a string, because having /* inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages
+      if (in_comment) {  // If we’re currently in a multi-line comment,
+        row->hl[i] = HL_MLCOMMENT;  // highlight the current character with HL_MLCOMMENT
+        if (!strncmp(&row->render[i], mce, mce_len)) {  // if character == */ - check if we’re at the end of a multi-line comment by using strncmp() with mce
+          memset(&row->hl[i], HL_MLCOMMENT, mce_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+          i += mce_len;  // consume both characters by adding to length (i)
+          in_comment = 0;  // set to FALSE because we are out of the comment
+          prev_sep = 1;  // set prev_sep to true because the end of a comment is considered a separator character
+          continue;  // continue to the next iteration of the while loop
+        } else { // not at the end of a multiline comment - inside multiline comment
+          i++;  // consume the single character inside the multiline comment
+          continue;  // continue to the next iteration of the while loop
         }
-      } else if (!strncmp(&row->render[i], mcs, mcs_len)) {
-        memset(&row->hl[i], HL_MLCOMMENT, mcs_len);
-        i += mcs_len;
-        in_comment = 1;
-        continue;
+      } else if (!strncmp(&row->render[i], mcs, mcs_len)) {  // not in multiline comment - if at the beginning of a multiline comment
+        memset(&row->hl[i], HL_MLCOMMENT, mcs_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+        i += mcs_len;  // consume both characters by adding to length (i)
+        in_comment = 1;  // set to TRUE because we are now inside a multiline comment
+        continue;   // continue to the next iteration of the while loop
       }
     }
 
@@ -455,6 +457,12 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
     prev_sep = is_separator(c);  // current character is not a number - set prev_sep
     i++;  // increment i since we didn't continue the loop
   }
+
+  // end of row processing
+  int changed = (row->hl_open_comment != in_comment);  // if the value of hl_open_comment changed
+  row->hl_open_comment = in_comment;  // set the value of the current row’s hl_open_comment to whatever state in_comment got left in after processing the entire row - tells us whether the row ended as an unclosed multi-line comment or not.
+  if (changed && row->index + 1 < E.numrows)  // if the value of hl_open_comment changed and this not the last line of the file/text
+    editorUpdateSyntax(&E.row[row->index + 1]);  // recursive call to editorUpdateSyntax with next row as arguement - this will update the syntax of every row after this one until the end of the file if this line ended in an open line comment
 }  // rework this without the continue and remove the second incrementation of i
 
 // -----------------------------------------------------------------------------
@@ -576,6 +584,9 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));  // allocate memory for a new row
   memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at)); // shift all rows after the index at down by one to make room for new row at at
+  for (int j = at + 1; j <= E.numrows; j++) E.row[j].index++;  // update the idx of each row after the inserted row whenever a row is inserted into a file
+
+  E.row[at].index = at;  // initialize idx to the row’s index in the file at the time it is inserted
 
   E.row[at].size = len;
   E.row[at].chars = malloc(len + 1);
@@ -585,6 +596,7 @@ void editorInsertRow(int at, char *s, size_t len) {
   E.row[at].rsize = 0;
   E.row[at].render = NULL;
   E.row[at].hl = NULL;
+  E.row[at].hl_open_comment = 0;  // should be FALSE
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
@@ -605,6 +617,7 @@ void editorDelRow(int at) {
   if (at < 0 || at >= E.numrows) return;  // validate at index
   editorFreeRow(&E.row[at]);  // free the memory owned by the row using editorFreeRow()
   memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));  // use memmove() to overwrite the deleted row struct with the rest of the rows that come after it
+  for (int j = at; j <= E.numrows - 1; j++) E.row[j].index--;  // update the index of each row after the deleted row whenever a row is deleted from a file
   E.numrows--;  
   E.dirty++;
 }
