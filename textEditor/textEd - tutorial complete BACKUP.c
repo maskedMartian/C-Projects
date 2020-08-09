@@ -31,7 +31,7 @@ the text color back to normal.
 #include <stdio.h>      // needed for perror(), printf(), sscanf(), snprintf(), FILE, fopen(), getline(), vsnprintf()
 #include <stdarg.h>     // needed for va_list, va_start(), and va_end()
 #include <stdlib.h>     // Needed for exit(), atexit(), realloc(), free(), malloc()
-#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset()
+#include <string.h>     // Needed for memcpy(), strlen(), strup(), memmove(), strerror(), strstr(), memset(), strchr(), strcmp(), strncmp()
 #include <sys/ioctl.h>  // Needed for struct winsize, ioctl(), TIOCGWINSZ 
 #include <sys/types.h>  // Needed for ssize_t
 #include <termios.h>    // Needed for struct termios, tcsetattr(), TCSAFLUSH, tcgetattr(), BRKINT, ICRNL, INPCK, ISTRIP, 
@@ -63,21 +63,41 @@ enum editorKey {
 
 enum editorHighlight {  // enum of highlight colors
   HL_NORMAL = 0,
+  HL_COMMENT,
+  HL_MLCOMMENT,
+  HL_KEYWORD1,
+  HL_KEYWORD2,
+  HL_STRING,
   HL_NUMBER,
   HL_MATCH
 };
 
+#define HL_HIGHLIGHT_NUMBERS  (1<<0)  // For now, we define just the HL_HIGHLIGHT_NUMBERS flag bit.
+#define HL_HIGHLIGHT_STRINGS  (1<<1)  // Now let’s add an HL_HIGHLIGHT_STRINGS bit flag to the flags field of the editorSyntax struct, and turn on the flag when highlighting C files.
+
 /*** data ***/
 
+struct editorSyntax {
+  char *filetype;    // the name of the filetype that will be displayed to the user in the status bar
+  char **filematch;  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
+  char **keywords;  // an array of strings to hold programming language keywords
+  char *singleline_comment_start;  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a singleline_comment_start string to the editorSyntax struct, and set it to "//" for the C filetype. 
+  char *multiline_comment_start;
+  char *multiline_comment_end;
+  int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
+};
+
 typedef struct erow {  // the typedef lets us refer to the type as "erow" instead of "struct erow"
+  int index;
   int size;  // the quantity of elements in the *chars array
   int rsize;  // the quantity of elements in the *render array
   char *chars;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
   char *render;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
   unsigned char *hl;  // "highlight" - an array to store the highlighting characteristics of each character
+  int hl_open_comment;  // variable type/name should be BOOLEAN hasUnclosedMultilineComment 
 } erow;  // erow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
 
-struct editorConfig {
+struct editorConfig {  // global editor state
   int cx, cy;  // cx - horizontal index into the chars field of erow (cursor location???)
   int rx;  //horizontal index into the render field of erow - if there are no tab son the current line, rx will be the same as cx 
   int rowoff;  // row offset - keeps track of what row of the file the user is currently scrolled to
@@ -90,10 +110,36 @@ struct editorConfig {
   char *filename;  // Name of the file being edited
   char statusmsg[80];  // holds an 80 character message to the user displayed on the status bar.
   time_t statusmsg_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
+  struct editorSyntax *syntax;  // a pointer to the current editorSyntax struct in the global editor state
   struct termios orig_termios;  // structure to hold the original state of the terminal when our program began, before we started altering its state
 };
 
 struct editorConfig E;
+
+/*** filetypes ***/
+
+char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
+char *C_HL_keywords[] = {
+  "switch", "if", "while", "for", "break", "continue", "return", "else",
+  "struct", "union", "typedef", "static", "enum", "class", "case",
+
+  "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",  // type keywords are each ended with a | character and treated as secondary keywords
+  "void|", NULL
+};
+
+struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it's an array of editorSyntax structs
+  {
+    "c",  // filetype field
+    C_HL_extensions,  // filematch field
+    C_HL_keywords,   // keywords field
+    "//",  // singleline_comment_ start field
+    "/*",
+    "*/",
+    HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS  // flags field
+  },
+};
+
+#define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))  // define an HLDB_ENTRIES constant to store the length of the HLDB array
 
 /*** prototypes ***/
 // 8888888b.  8888888b.   .d88888b. 88888888888 .d88888b. 88888888888 Y88b   d88P 8888888b.  8888888888 .d8888b.  
@@ -266,7 +312,7 @@ int getWindowSize(int *rows, int *cols)
   }
 }
 
-/*** syntax highlighting ***/
+
 // 888    888 8888888 .d8888b.  888    888 888      8888888 .d8888b.  888    888 88888888888 
 // 888    888   888  d88P  Y88b 888    888 888        888  d88P  Y88b 888    888     888     
 // 888    888   888  888    888 888    888 888        888  888    888 888    888     888     
@@ -276,31 +322,195 @@ int getWindowSize(int *rows, int *cols)
 // 888    888   888  Y88b  d88P 888    888 888        888  Y88b  d88P 888    888     888     
 // 888    888 8888888 "Y8888P88 888    888 88888888 8888888 "Y8888P88 888    888     888   
 
+/*** syntax highlighting ***/
 
 // -----------------------------------------------------------------------------
-//
+// Right now, numbers are highlighted even if they’re part of an identifier, such as the 32 in int32_t. To fix that, we’ll require that 
+//numbers are preceded by a separator character, which includes whitespace or punctuation characters. We also include the null byte ('\0'),
+// because then we can count the null byte at the end of each line as a separator, which will make some of our code simpler in the future.
+int is_separator(int c) {  // this function should be type Boolean 
+  return isspace(c) || c == '\0' || strchr(",.()+-/*=~%<>{}:", c) != NULL;  
+  // these are ALL boolean conditions
+}
+
+// -----------------------------------------------------------------------------
+// Might not need int prev_sep - maybe just use function? OR maybe keep track of what type of char the prev char was - not just separartor, but number, or other too???
 void editorUpdateSyntax(erow *row) {
   row->hl = realloc(row->hl, row->rsize);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
   memset(row->hl, HL_NORMAL, row->rsize);  // use memset() to set all characters to HL_NORMAL by default
 
-  int i;
-  for (i = 0; i < row->size; i++) {  // loop through the characters
-    if (isdigit(row->render[i])) {
-      row->hl[i] = HL_NUMBER;        // set the digits to HL_NUMBER
+  if (E.syntax == NULL) return;
+
+  char **keywords = E.syntax->keywords;  // declare an array of strings (pointer to a pointer) and point it at the keywords array in the E.syntax struct
+
+  // If you don’t want single-line comment highlighting for a particular filetype, you should be able to set singleline_comment_start either to NULL or to the empty string ("")
+  char *scs = E.syntax->singleline_comment_start;  // We make scs an alias for E.syntax->singleline_comment_start for easier typing (and readability, perhaps?)
+  char *mcs = E.syntax->multiline_comment_start;
+  char *mce = E.syntax->multiline_comment_end;
+
+  int scs_len = scs ? strlen(scs) : 0;  // We then set scs_len to the length of the string, or 0 if the string is NULL. This lets us use scs_len as a boolean to know whether we should highlight single-line comments
+  int mcs_len = mcs ? strlen(mcs) : 0;
+  int mce_len = mce ? strlen(mce) : 0;
+
+  // make this a boolean
+  int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
+                     // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
+  int in_string = 0;  // keep track of whether we are currently inside a string
+  int in_comment = (row->index > 0 && E.row[row->index - 1].hl_open_comment);  // initialize in_comment to true if the previous row has an unclosed multi-line comment
+
+  int i = 0;
+  while (i < row->size) {  // loop through the characters
+    char c = row->render[i];
+    unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
+
+    if (scs_len && !in_string && !in_comment) {  // So we wrap our comment highlighting code in an if statement that checks scs_len and also makes sure we’re not in a string and not in a multiline comment, since we’re placing this code above the string highlighting code (order matters a lot in this function)
+      if (!strncmp(&row->render[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
+        memset(&row->hl[i], HL_COMMENT, row->rsize - i);  // simply memset() the whole rest of the line with HL_COMMENT
+        break;  // break out of the syntax highlighting loop
+      }
     }
+
+/*   First we add an in_comment boolean variable to keep track of whether we’re currently inside a multi-line comment (this variable isn’t used for single-line comments).
+Moving down into the while loop, we require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting. We also check to make sure we’re not in a string, because having (/ *) inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages.
+If we’re currently in a multi-line comment, then we can safely highlight the current character with HL_MLCOMMENT. Then we check if we’re at the end of a multi-line comment by using strncmp() with mce. If so, we use memset() to highlight the whole mce string with HL_MLCOMMENT, and then we consume it. If we’re not at the end of the comment, we simply consume the current character which we already highlighted.
+If we’re not currently in a multi-line comment, then we use strncmp() with mcs to check if we’re at the beginning of a multi-line comment. If so, we use memset() to highlight the whole mcs string with HL_MLCOMMENT, set in_comment to true, and consume the whole mcs string.
+*/ 
+    // code for highlighting /* C */ style comments
+    if (mcs_len && mce_len && !in_string) {  // require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting - check to make sure we’re not in a string, because having /* inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages
+      if (in_comment) {  // If we’re currently in a multi-line comment,
+        row->hl[i] = HL_MLCOMMENT;  // highlight the current character with HL_MLCOMMENT
+        if (!strncmp(&row->render[i], mce, mce_len)) {  // if character == */ - check if we’re at the end of a multi-line comment by using strncmp() with mce
+          memset(&row->hl[i], HL_MLCOMMENT, mce_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+          i += mce_len;  // consume both characters by adding to length (i)
+          in_comment = 0;  // set to FALSE because we are out of the comment
+          prev_sep = 1;  // set prev_sep to true because the end of a comment is considered a separator character
+          continue;  // continue to the next iteration of the while loop
+        } else { // not at the end of a multiline comment - inside multiline comment
+          i++;  // consume the single character inside the multiline comment
+          continue;  // continue to the next iteration of the while loop
+        }
+      } else if (!strncmp(&row->render[i], mcs, mcs_len)) {  // not in multiline comment - if at the beginning of a multiline comment
+        memset(&row->hl[i], HL_MLCOMMENT, mcs_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+        i += mcs_len;  // consume both characters by adding to length (i)
+        in_comment = 1;  // set to TRUE because we are now inside a multiline comment
+        continue;   // continue to the next iteration of the while loop
+      }
+    }
+
+    // We will use an in_string variable to keep track of whether we are currently inside a string. If we are, then we’ll keep 
+    // highlighting the current character as a string until we hit the closing quote.
+    if (E.syntax->flags & HL_HIGHLIGHT_STRINGS) {
+      if (in_string) {
+        row->hl[i] = HL_STRING;
+        if (c == '\\' && i + 1 < row->rsize) {  // If we’re in a string and the current character is a backslash (\), and there’s at least one more character in that line that comes after the backslash, then we highlight the character that comes after the backslash with HL_STRING and consume it. We increment i by 2 to consume both characters at once.
+          row->hl[i + 1] = HL_STRING;
+          i += 2;
+          continue;
+        }
+        if (c == in_string) in_string = 0;  // if the string closes
+        i++;
+        prev_sep = 1;
+        continue;
+      } else {
+        if (c == '"' || c == '\'') {  // if a string opens -  we highlight both double-quoted strings and single-quoted strings
+          in_string = c;  // store the character so we know what the closing character will be - single or double quotes
+          row->hl[i] = HL_STRING;
+          i++;
+          continue;
+        }
+      }
+    }
+
+
+    if (E.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
+      // right now this will highlight all periods in 3.....4 - do I want it to do that?
+      if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
+          (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
+        row->hl[i] = HL_NUMBER;  // set the digits to HL_NUMBER
+        i++; // increment I since we are continuing the loop
+        prev_sep = 0;  // reset prev_sep since the current char is not a separator
+        continue;
+      }
+    }
+
+    // keywords require a separator both before and after the keyword - Otherwise, the void in avoid, voided, or avoidable would be highlighted as a keyword, which is definitely a problem we want to, uh, circumnavigate.
+    if (prev_sep) {  // check for previous separator character
+      int j;
+      for (j = 0; keywords[j]; j++) {  // for each element in the keywords array - we can use a foreach type array because the last element is holdding NULL as a value
+        int klen = strlen(keywords[j]);  // length of the keyword at position j in the array
+        int kw2 = keywords[j][klen - 1] == '|';  // if the last character of the keyword is a pipe 
+        if (kw2) klen--;  // if the last character is a pipe, decrement length by one
+
+        if (!strncmp(&row->render[i], keywords[j], klen) &&  // if the word in the render array matches the current keyword being checked  
+            is_separator(row->render[i + klen])) {  // if the character after the keyword in the render array is a separator
+          memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);  // use memeset to set the correct number (length of keyword) of bytes in the hl array to the correct highlight color
+        i += klen;  // consume all the characters of the keyword
+        break;  // end the for loop once a keyword has been found and highlighted
+        }
+      }
+      if (keywords[j] != NULL) {  // if we have not reached the last element of the keywords array - the for loop was exited early by break
+        prev_sep = 0;  // previous character is not a seperator
+        continue;  // continue main while loop
+      }
+    }
+
+    prev_sep = is_separator(c);  // current character is not a number - set prev_sep
+    i++;  // increment i since we didn't continue the loop
   }
-}
+
+  // end of row processing
+  int changed = (row->hl_open_comment != in_comment);  // if the value of hl_open_comment changed
+  row->hl_open_comment = in_comment;  // set the value of the current row’s hl_open_comment to whatever state in_comment got left in after processing the entire row - tells us whether the row ended as an unclosed multi-line comment or not.
+  if (changed && row->index + 1 < E.numrows)  // if the value of hl_open_comment changed and this not the last line of the file/text
+    editorUpdateSyntax(&E.row[row->index + 1]);  // recursive call to editorUpdateSyntax with next row as arguement - this will update the syntax of every row after this one until the end of the file if this line ended in an open line comment
+}  // rework this without the continue and remove the second incrementation of i
 
 // -----------------------------------------------------------------------------
 //
 int editorSyntaxToColor(int hl) {
   switch (hl) {
+    case HL_COMMENT: 
+    case HL_MLCOMMENT: return 36; // return the ANSI code for "foreground cyan"
+    case HL_KEYWORD1: return 33;  // return the ANSI code for "foreground yellow"
+    case HL_KEYWORD2: return 32;  // return the ANSI code for "foreground green"
+    case HL_STRING: return 35;  // return the ANSI code for "foreground magenta"
     case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
-    case HL_MATCH: return 33;   // return the ANSI code for "foreground blue"
+    case HL_MATCH: return 34;   // return the ANSI code for "foreground blue"
     default: return 37;         // return the ANSI code for "foreground white"
   }
 }
 
+// -----------------------------------------------------------------------------
+// we loop through each editorSyntax struct in the HLDB array, and for each one of those, we loop through each pattern in its filematch 
+// array. If the pattern starts with a ., then it’s a file extension pattern, and we use strcmp() to see if the filename ends with that 
+// extension. If it’s not a file extension pattern, then we just check to see if the pattern exists anywhere in the filename, using 
+// strstr(). If the filename matched according to those rules, then we set E.syntax to the current editorSyntax struct, and return.
+void editorSelectSyntaxHighlight() {
+  E.syntax = NULL;  // set E.syntax to NULL, so that if nothing matches or if there is no filename, then there is no filetype
+  if (E.filename == NULL) return;
+
+  char *ext = strrchr(E.filename, '.');  // ext = extension - strrchr() returns a pointer to the last occurrence of a character in a string (so we can look at just the file extention) - if there is no extension, then ext will be NULL
+
+  for (unsigned int j = 0; j <HLDB_ENTRIES; j++) {  // loop  through each editorSyntax struct in the HLDB array
+    struct editorSyntax *s = &HLDB[j];
+    unsigned int i = 0;
+    while (s->filematch[i]) {  // loop through each pattern in its filematch array
+      int is_ext = (s->filematch[i][0] == '.');
+      if ((is_ext && ext && !strcmp(ext, s->filematch[i])) ||   // strcmp() returns 0 if two given strings are equal
+          (!is_ext && strstr(E.filename, s->filematch[i]))) { 
+        E.syntax = s;
+
+        int filerow;
+        for (filerow = 0; filerow < E.numrows; filerow++) {
+          editorUpdateSyntax(&E.row[filerow]);
+        }
+
+        return;
+      }
+      i++;
+    }
+  }
+}
 
 /*** row operations ***/
 // 8888888b.   .d88888b.  888       888       .d88888b.  8888888b.  8888888888 8888888b.         d8888 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
@@ -374,6 +584,9 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));  // allocate memory for a new row
   memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at)); // shift all rows after the index at down by one to make room for new row at at
+  for (int j = at + 1; j <= E.numrows; j++) E.row[j].index++;  // update the idx of each row after the inserted row whenever a row is inserted into a file
+
+  E.row[at].index = at;  // initialize idx to the row’s index in the file at the time it is inserted
 
   E.row[at].size = len;
   E.row[at].chars = malloc(len + 1);
@@ -383,6 +596,7 @@ void editorInsertRow(int at, char *s, size_t len) {
   E.row[at].rsize = 0;
   E.row[at].render = NULL;
   E.row[at].hl = NULL;
+  E.row[at].hl_open_comment = 0;  // should be FALSE
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
@@ -403,6 +617,7 @@ void editorDelRow(int at) {
   if (at < 0 || at >= E.numrows) return;  // validate at index
   editorFreeRow(&E.row[at]);  // free the memory owned by the row using editorFreeRow()
   memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));  // use memmove() to overwrite the deleted row struct with the rest of the rows that come after it
+  for (int j = at; j <= E.numrows - 1; j++) E.row[j].index--;  // update the index of each row after the deleted row whenever a row is deleted from a file
   E.numrows--;  
   E.dirty++;
 }
@@ -535,6 +750,9 @@ char *editorRowsToString(int *buflen) {
 void editorOpen(char *filename) {
   free(E.filename);
   E.filename = strdup(filename);
+
+  editorSelectSyntaxHighlight();
+
   FILE *fp = fopen(filename, "r");
   if (!fp) die("fopen");
 
@@ -561,6 +779,7 @@ void editorSave() {
       editorSetStatusMessage("Save aborted");
       return;
     }
+    editorSelectSyntaxHighlight();
   }
 
   int len;
@@ -773,7 +992,17 @@ void editorDrawRows(struct abuf *ab) {
       int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {  // for every character 
-        if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
+        if (iscntrl(c[j])) {  // We use iscntrl() to check if the current character is a control character. 
+          char sym = (c[j] <= 26) ? '@' + c[j] : '?';  // If so, we translate it into a printable character by adding its value to '@' (in ASCII, the capital letters of the alphabet come after the @ character), or using the '?' character if it’s not in the alphabetic range.
+          abAppend(ab, "\x1b[7m", 4);  // use the <esc>[7m escape sequence to switch to inverted colors
+          abAppend(ab, &sym, 1);  // add new symbol we just created to the buffer
+          abAppend(ab, "\x1b[m", 3); //  use <esc>[m to turn off inverted colors - Unfortunately, <esc>[m turns off all text formatting, including colors. So let’s print the escape sequence for the current color afterwards.
+          if (current_color != -1) {
+            char buf[16];
+            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);  // clen is c length
+            abAppend(ab, buf, clen);
+          }
+        } else if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
           if (current_color != -1) {
             abAppend(ab, "\x1b[39m", 5);  // append an escaspe sequence for NORMAL coloring
             current_color = -1;
@@ -812,8 +1041,8 @@ void editorDrawStatusBar(struct abuf *ab) {
   int len = snprintf(status, sizeof(status), "%.20s - %d lines %s",
     E.filename ? E.filename : "[No Name]", E.numrows, 
     E.dirty ? "(modified)" : "");
-  int rlen = snprintf(rstatus, sizeof(rstatus), "%d/%d",
-    E.cy + 1, E.numrows);
+  int rlen = snprintf(rstatus, sizeof(rstatus), "%s | %d/%d",
+    E.syntax ? E.syntax->filetype : "no filetype", E.cy + 1, E.numrows);  // prints file type (or no filetype) and current line as well as total lines
   if (len > E.screencols) len = E.screencols;
   abAppend(ab, status, len);
   while (len < E.screencols) {
@@ -1093,6 +1322,7 @@ void initEditor() {
   E.filename = NULL;
   E.statusmsg[0] = '\0';
   E.statusmsg_time = 0;
+  E.syntax = NULL;  // When E.syntax is NULL, that means there is no filetype for the current file, and no syntax highlighting should be done
 
   if (getWindowSize(&E.screenrows, &E.screencols) == -1) die("getWindowSize");
   E.screenrows -= 2;
