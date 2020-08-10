@@ -38,21 +38,19 @@ the text color back to normal.
                         // IXON, OPOST, CS8, ECHO, ICANON, IEXTEN, ISIG, VMIN, VTIME
 #include <time.h>       // Needed for time_t, time()
 #include <unistd.h>     // Needed for read(), STDIN_FILENO, write(), STDOUT_FILENO, ftruncate(), close()
+#include <stdbool.h>    // Needed for bool, true, and false
 
 /*** defines ***/
 
-#define FALSE             0
-#define TRUE              1
 #define ERROR            -1
 
-
-#define MY_EDITOR_VERSION    "0.0.1"
-#define TAB_STOP           8
-#define QUIT_TIMES         3
+#define VERSION            "0.0.1"
+#define TAB_WIDTH           8
+#define TIMES_TO_QUIT         3
 
 #define CTRL_KEY(k)        ((k) & 0x1F)  // unset the upper 3 bits of k
 
-enum editorKey {
+enum specialKeys {
   BACKSPACE = 127,
   ARROW_LEFT = 1000,
   ARROW_RIGHT,
@@ -65,69 +63,68 @@ enum editorKey {
   PAGE_DOWN
 };
 
-enum editorHighlight {  // enum of highlight colors
+enum textHighlightColors {  // enum of highlight colors
   HL_NORMAL = 0,
   HL_COMMENT,
-  HL_MLCOMMENT,
-  HL_KEYWORD1,
-  HL_KEYWORD2,
+  HL_MULTILINE_COMMENT,
+  HL_KEYWORD,
+  HL_TYPE,
   HL_STRING,
   HL_NUMBER,
   HL_MATCH
 };
 
-#define HL_HIGHLIGHT_NUMBERS  (1<<0)  // For now, we define just the HL_HIGHLIGHT_NUMBERS flag bit.
-#define HL_HIGHLIGHT_STRINGS  (1<<1)  // Now let’s add an HL_HIGHLIGHT_STRINGS bit flag to the flags field of the editorSyntax struct, and turn on the flag when highlighting C files.
+#define HIGHLIGHT_NUMBERS       (1)  // For now, we define just the HIGHLIGHT_NUMBERS flag bit.
+#define HIGHLIGHT_STRINGS  (1 << 1)  // Now let’s add an HIGHLIGHT_STRINGS bit flag to the flags field of the languageSyntax struct, and turn on the flag when highlighting C files.
 
 /*** data ***/
 
-struct editorSyntax {
-  char *filetype;    // the name of the filetype that will be displayed to the user in the status bar
-  char **filematch;  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
-  char **keywords;  // an array of strings to hold programming language keywords
-  char *singleline_comment_start;  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a singleline_comment_start string to the editorSyntax struct, and set it to "//" for the C filetype. 
-  char *multiline_comment_start;
-  char *multiline_comment_end;
+typedef struct languageSyntax {
+  char *filetype,    // the name of the filetype that will be displayed to the user in the status bar
+       **filematch,  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
+       **keywords,  // an array of strings to hold programming language keywords
+       *commentStart,  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a commentStart string to the languageSyntax struct, and set it to "//" for the C filetype. 
+       *blockCommentStart,
+       *blockCommentEnd;
   int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
-};
+} languageSyntax;
 
 typedef unsigned char byte;
-typedef unsigned char boolean;
 
 typedef struct textRow {  // the typedef lets us refer to the type as "textRow" instead of "struct textRow"
-  int index;
-  int size;  // the quantity of elements in the *chars array
-  int rsize;  // the quantity of elements in the *render array
-  char *chars;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
-  char *render;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
-  unsigned char *hl;  // "highlight" - an array to store the highlighting characteristics of each character
-  int hl_open_comment;  // variable type/name should be BOOLEAN hasUnclosedMultilineComment 
-} textRow;  // textRow stands for "editor row" - it stores a line of text as a pointer to the dynamically-allocated character data and a length
+  int index,
+      length,  // the quantity of elements in the *characters array
+      displayLength;  // the quantity of elements in the *display array
+  char *characters,  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
+       *display;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
+  byte *highlight;  // "highlight" - an array to store the highlighting characteristics of each character
+  bool commentLeftOpen;  // variable type/name should be BOOLEAN hasUnclosedMultilineComment 
+} textRow;  // stores a line of text as a pointer to the dynamically-allocated character data and a length
 
-struct editorConfig {  // global editor state
+typedef struct textBuffer {  // global editor state
   int cursorXPosition, 
-      cursorYPosition;  // cursorXPosition - horizontal index into the chars field of textRow (cursor location???)
-  int renderXPosition;  //horizontal index into the render field of textRow - if there are no tab son the current line, renderXPosition will be the same as cursorXPosition 
-  int rowOffset;  // row offset - keeps track of what row of the file the user is currently scrolled to
-  int columnOffset;  // column offset - keeps track of what column of the file the user is currently scrolled to
-  int screenRows;  // qty of rows on the screen - window size
-  int screenColumns;  // qty of columns on the screen - window size
-  int totalRows;  // the number of rows (lines) of text being displayed/stored by the editor
+      cursorYPosition,  // cursorXPosition - horizontal index into the characters field of textRow (cursor location???)
+      displayXPosition,  //horizontal index into the display field of textRow - if there are no tab son the current line, displayXPosition will be the same as cursorXPosition 
+      rowOffset,  // row offset - keeps track of what row of the file the user is currently scrolled to
+      columnOffset,  // column offset - keeps track of what column of the file the user is currently scrolled to
+      screenRows,  // qty of rows on the screen - window size
+      screenColumns,  // qty of columns on the screen - window size
+      totalRows;  // the number of rows (lines) of text being displayed/stored by the editor
   textRow *row;  // Hold a single row of test, both as read from a file, and as displayed on the screen
-  boolean modified;  // modified flag - We call a text buffer “modified” if it has been modified since opening or saving the file - used to keep track of whether the text loaded in our editor differs from what’s in the file
-  char *filename;  // Name of the file being edited
-  char statusMessage[80];  // holds an 80 character message to the user displayed on the status bar.
+  bool modified;  // modified flag - We call a text buffer “modified” if it has been modified since opening or saving the file - used to keep track of whether the text loaded in our editor differs from what’s in the file
+  char *filename,  // Name of the file being edited
+       statusMessage[80];  // holds an 80 character message to the user displayed on the status bar.
   time_t statusMessage_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
-  struct editorSyntax *syntax;  // a pointer to the current editorSyntax struct in the global editor state
+  languageSyntax *syntax;  // a pointer to the current languageSyntax struct in the global editor state
   struct termios originalTerminalState;  // structure to hold the original state of the terminal when our program began, before we started altering its state
-};
+} textBuffer;
 
-struct editorConfig Text;
+textBuffer Text;
 
 /*** filetypes ***/
 
-char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
-char *C_HL_keywords[] = {
+char *C_fileExtensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
+char *C_keywords[] = {
   "switch", "if", "while", "for", "break", "continue", "return", "else",
   "struct", "union", "typedef", "static", "enum", "class", "case",
 
@@ -135,19 +132,19 @@ char *C_HL_keywords[] = {
   "void|", NULL
 };
 
-struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it's an array of editorSyntax structs
+languageSyntax languageDatabase[] = {  // languageDatabase stands for “highlight database” - it's an array of languageSyntax structs
   {
     "c",  // filetype field
-    C_HL_extensions,  // filematch field
-    C_HL_keywords,   // keywords field
+    C_fileExtensions,  // filematch field
+    C_keywords,   // keywords field
     "//",  // singleline_comment_ start field
     "/*",
     "*/",
-    HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS  // flags field
+    HIGHLIGHT_NUMBERS | HIGHLIGHT_STRINGS  // flags field
   },
 };
 
-#define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))  // define an HLDB_ENTRIES constant to store the length of the HLDB array
+#define DATABASE_ENTRIES (sizeof(languageDatabase) / sizeof(languageDatabase[0]))  // define an DATABASE_ENTRIES constant to store the length of the languageDatabase array
 
 /*** prototypes ***/
 // 8888888b.  8888888b.   .d88888b. 88888888888 .d88888b. 88888888888 Y88b   d88P 8888888b.  8888888888 .d8888b.  
@@ -162,6 +159,15 @@ struct editorSyntax HLDB[] = {  // HLDB stands for “highlight database” - it
 void editorSetStatusMessage(const char *fmt, ...);
 void editorRefreshScreen();
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
+
+// 8888888888 888     888 888b    888  .d8888b. 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
+// 888        888     888 8888b   888 d88P  Y88b    888       888  d88P" "Y88b 8888b   888 d88P  Y88b 
+// 888        888     888 88888b  888 888    888    888       888  888     888 88888b  888 Y88b.      
+// 8888888    888     888 888Y88b 888 888           888       888  888     888 888Y88b 888  "Y888b.   
+// 888        888     888 888 Y88b888 888           888       888  888     888 888 Y88b888     "Y88b. 
+// 888        888     888 888  Y88888 888    888    888       888  888     888 888  Y88888       "888 
+// 888        Y88b. .d88P 888   Y8888 Y88b  d88P    888       888  Y88b. .d88P 888   Y8888 Y88b  d88P 
+// 888         "Y88888P"  888    Y888  "Y8888P"     888     8888888 "Y88888P"  888    Y888  "Y8888P"  
 
 /*** terminal ***/
 // 88888888888 8888888888 8888888b.  888b     d888 8888888 888b    888        d8888 888      
@@ -349,17 +355,17 @@ int is_separator(int c) {  // this function should be type Boolean
 // -----------------------------------------------------------------------------
 // Might not need int prev_sep - maybe just use function? OR maybe keep track of what type of char the prev char was - not just separartor, but number, or other too???
 void editorUpdateSyntax(textRow *row) {
-  row->hl = realloc(row->hl, row->rsize);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
-  memset(row->hl, HL_NORMAL, row->rsize);  // use memset() to set all characters to HL_NORMAL by default
+  row->highlight = realloc(row->highlight, row->displayLength);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
+  memset(row->highlight, HL_NORMAL, row->displayLength);  // use memset() to set all characters to HL_NORMAL by default
 
   if (Text.syntax == NULL) return;
 
   char **keywords = Text.syntax->keywords;  // declare an array of strings (pointer to a pointer) and point it at the keywords array in the Text.syntax struct
 
-  // If you don’t want single-line comment highlighting for a particular filetype, you should be able to set singleline_comment_start either to NULL or to the empty string ("")
-  char *scs = Text.syntax->singleline_comment_start;  // We make scs an alias for Text.syntax->singleline_comment_start for easier typing (and readability, perhaps?)
-  char *mcs = Text.syntax->multiline_comment_start;
-  char *mce = Text.syntax->multiline_comment_end;
+  // If you don’t want single-line comment highlighting for a particular filetype, you should be able to set commentStart either to NULL or to the empty string ("")
+  char *scs = Text.syntax->commentStart;  // We make scs an alias for Text.syntax->commentStart for easier typing (and readability, perhaps?)
+  char *mcs = Text.syntax->blockCommentStart;
+  char *mce = Text.syntax->blockCommentEnd;
 
   int scs_len = scs ? strlen(scs) : 0;  // We then set scs_len to the length of the string, or 0 if the string is NULL. This lets us use scs_len as a boolean to know whether we should highlight single-line comments
   int mcs_len = mcs ? strlen(mcs) : 0;
@@ -369,54 +375,54 @@ void editorUpdateSyntax(textRow *row) {
   int prev_sep = 1;  // previous_separator - keeps track of whether the previous character was a separator so it can be used to recognize and highlight numbers properly. 
                      // We initialize prev_sep to 1 (meaning true) because we consider the beginning of the line to be a separator.
   int in_string = 0;  // keep track of whether we are currently inside a string
-  int in_comment = (row->index > 0 && Text.row[row->index - 1].hl_open_comment);  // initialize in_comment to true if the previous row has an unclosed multi-line comment
+  bool in_comment = (row->index > 0 && Text.row[row->index - 1].commentLeftOpen);  // initialize in_comment to true if the previous row has an unclosed multi-line comment
 
   int i = 0;
-  while (i < row->size) {  // loop through the characters
-    char c = row->render[i];
-    unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
+  while (i < row->length) {  // loop through the characters
+    char c = row->display[i];
+    byte prev_hl = (i > 0) ? row->highlight[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
 
     if (scs_len && !in_string && !in_comment) {  // So we wrap our comment highlighting code in an if statement that checks scs_len and also makes sure we’re not in a string and not in a multiline comment, since we’re placing this code above the string highlighting code (order matters a lot in this function)
-      if (!strncmp(&row->render[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
-        memset(&row->hl[i], HL_COMMENT, row->rsize - i);  // simply memset() the whole rest of the line with HL_COMMENT
+      if (!strncmp(&row->display[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
+        memset(&row->highlight[i], HL_COMMENT, row->displayLength - i);  // simply memset() the whole rest of the line with HL_COMMENT
         break;  // break out of the syntax highlighting loop
       }
     }
 
 /*   First we add an in_comment boolean variable to keep track of whether we’re currently inside a multi-line comment (this variable isn’t used for single-line comments).
 Moving down into the while loop, we require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting. We also check to make sure we’re not in a string, because having (/ *) inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages.
-If we’re currently in a multi-line comment, then we can safely highlight the current character with HL_MLCOMMENT. Then we check if we’re at the end of a multi-line comment by using strncmp() with mce. If so, we use memset() to highlight the whole mce string with HL_MLCOMMENT, and then we consume it. If we’re not at the end of the comment, we simply consume the current character which we already highlighted.
-If we’re not currently in a multi-line comment, then we use strncmp() with mcs to check if we’re at the beginning of a multi-line comment. If so, we use memset() to highlight the whole mcs string with HL_MLCOMMENT, set in_comment to true, and consume the whole mcs string.
+If we’re currently in a multi-line comment, then we can safely highlight the current character with HL_MULTILINE_COMMENT. Then we check if we’re at the end of a multi-line comment by using strncmp() with mce. If so, we use memset() to highlight the whole mce string with HL_MULTILINE_COMMENT, and then we consume it. If we’re not at the end of the comment, we simply consume the current character which we already highlighted.
+If we’re not currently in a multi-line comment, then we use strncmp() with mcs to check if we’re at the beginning of a multi-line comment. If so, we use memset() to highlight the whole mcs string with HL_MULTILINE_COMMENT, set in_comment to true, and consume the whole mcs string.
 */ 
     // code for highlighting /* C */ style comments
     if (mcs_len && mce_len && !in_string) {  // require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting - check to make sure we’re not in a string, because having /* inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages
       if (in_comment) {  // If we’re currently in a multi-line comment,
-        row->hl[i] = HL_MLCOMMENT;  // highlight the current character with HL_MLCOMMENT
-        if (!strncmp(&row->render[i], mce, mce_len)) {  // if character == */ - check if we’re at the end of a multi-line comment by using strncmp() with mce
-          memset(&row->hl[i], HL_MLCOMMENT, mce_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+        row->highlight[i] = HL_MULTILINE_COMMENT;  // highlight the current character with HL_MULTILINE_COMMENT
+        if (!strncmp(&row->display[i], mce, mce_len)) {  // if character == */ - check if we’re at the end of a multi-line comment by using strncmp() with mce
+          memset(&row->highlight[i], HL_MULTILINE_COMMENT, mce_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
           i += mce_len;  // consume both characters by adding to length (i)
-          in_comment = 0;  // set to FALSE because we are out of the comment
+          in_comment = false;  // set to false because we are out of the comment
           prev_sep = 1;  // set prev_sep to true because the end of a comment is considered a separator character
           continue;  // continue to the next iteration of the while loop
         } else { // not at the end of a multiline comment - inside multiline comment
           i++;  // consume the single character inside the multiline comment
           continue;  // continue to the next iteration of the while loop
         }
-      } else if (!strncmp(&row->render[i], mcs, mcs_len)) {  // not in multiline comment - if at the beginning of a multiline comment
-        memset(&row->hl[i], HL_MLCOMMENT, mcs_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+      } else if (!strncmp(&row->display[i], mcs, mcs_len)) {  // not in multiline comment - if at the beginning of a multiline comment
+        memset(&row->highlight[i], HL_MULTILINE_COMMENT, mcs_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
         i += mcs_len;  // consume both characters by adding to length (i)
-        in_comment = 1;  // set to TRUE because we are now inside a multiline comment
+        in_comment = true;  // set to true because we are now inside a multiline comment
         continue;   // continue to the next iteration of the while loop
       }
     }
 
     // We will use an in_string variable to keep track of whether we are currently inside a string. If we are, then we’ll keep 
     // highlighting the current character as a string until we hit the closing quote.
-    if (Text.syntax->flags & HL_HIGHLIGHT_STRINGS) {
+    if (Text.syntax->flags & HIGHLIGHT_STRINGS) {
       if (in_string) {
-        row->hl[i] = HL_STRING;
-        if (c == '\\' && i + 1 < row->rsize) {  // If we’re in a string and the current character is a backslash (\), and there’s at least one more character in that line that comes after the backslash, then we highlight the character that comes after the backslash with HL_STRING and consume it. We increment i by 2 to consume both characters at once.
-          row->hl[i + 1] = HL_STRING;
+        row->highlight[i] = HL_STRING;
+        if (c == '\\' && i + 1 < row->displayLength) {  // If we’re in a string and the current character is a backslash (\), and there’s at least one more character in that line that comes after the backslash, then we highlight the character that comes after the backslash with HL_STRING and consume it. We increment i by 2 to consume both characters at once.
+          row->highlight[i + 1] = HL_STRING;
           i += 2;
           continue;
         }
@@ -427,7 +433,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
       } else {
         if (c == '"' || c == '\'') {  // if a string opens -  we highlight both double-quoted strings and single-quoted strings
           in_string = c;  // store the character so we know what the closing character will be - single or double quotes
-          row->hl[i] = HL_STRING;
+          row->highlight[i] = HL_STRING;
           i++;
           continue;
         }
@@ -435,11 +441,11 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
     }
 
 
-    if (Text.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
+    if (Text.syntax->flags & HIGHLIGHT_NUMBERS) {
       // right now this will highlight all periods in 3.....4 - do I want it to do that?
       if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
           (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
-        row->hl[i] = HL_NUMBER;  // set the digits to HL_NUMBER
+        row->highlight[i] = HL_NUMBER;  // set the digits to HL_NUMBER
         i++; // increment I since we are continuing the loop
         prev_sep = 0;  // reset prev_sep since the current char is not a separator
         continue;
@@ -454,9 +460,9 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
         int kw2 = keywords[j][klen - 1] == '|';  // if the last character of the keyword is a pipe 
         if (kw2) klen--;  // if the last character is a pipe, decrement length by one
 
-        if (!strncmp(&row->render[i], keywords[j], klen) &&  // if the word in the render array matches the current keyword being checked  
-            is_separator(row->render[i + klen])) {  // if the character after the keyword in the render array is a separator
-          memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);  // use memeset to set the correct number (length of keyword) of bytes in the hl array to the correct highlight color
+        if (!strncmp(&row->display[i], keywords[j], klen) &&  // if the word in the display array matches the current keyword being checked  
+            is_separator(row->display[i + klen])) {  // if the character after the keyword in the display array is a separator
+          memset(&row->highlight[i], kw2 ? HL_TYPE : HL_KEYWORD, klen);  // use memeset to set the correct number (length of keyword) of bytes in the hl array to the correct highlight color
         i += klen;  // consume all the characters of the keyword
         break;  // end the for loop once a keyword has been found and highlighted
         }
@@ -472,20 +478,20 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
   }
 
   // end of row processing
-  int changed = (row->hl_open_comment != in_comment);  // if the value of hl_open_comment changed
-  row->hl_open_comment = in_comment;  // set the value of the current row’s hl_open_comment to whatever state in_comment got left in after processing the entire row - tells us whether the row ended as an unclosed multi-line comment or not.
-  if (changed && row->index + 1 < Text.totalRows)  // if the value of hl_open_comment changed and this not the last line of the file/text
+  int changed = (row->commentLeftOpen != in_comment);  // if the value of commentLeftOpen changed
+  row->commentLeftOpen = in_comment;  // set the value of the current row’s commentLeftOpen to whatever state in_comment got left in after processing the entire row - tells us whether the row ended as an unclosed multi-line comment or not.
+  if (changed && row->index + 1 < Text.totalRows)  // if the value of commentLeftOpen changed and this not the last line of the file/text
     editorUpdateSyntax(&Text.row[row->index + 1]);  // recursive call to editorUpdateSyntax with next row as arguement - this will update the syntax of every row after this one until the end of the file if this line ended in an open line comment
 }  // rework this without the continue and remove the second incrementation of i
 
 // -----------------------------------------------------------------------------
 //
-int editorSyntaxToColor(int hl) {
+int languageSyntaxToColor(int hl) {
   switch (hl) {
     case HL_COMMENT: 
-    case HL_MLCOMMENT: return 36; // return the ANSI code for "foreground cyan"
-    case HL_KEYWORD1: return 33;  // return the ANSI code for "foreground yellow"
-    case HL_KEYWORD2: return 32;  // return the ANSI code for "foreground green"
+    case HL_MULTILINE_COMMENT: return 36; // return the ANSI code for "foreground cyan"
+    case HL_KEYWORD: return 33;  // return the ANSI code for "foreground yellow"
+    case HL_TYPE: return 32;  // return the ANSI code for "foreground green"
     case HL_STRING: return 35;  // return the ANSI code for "foreground magenta"
     case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
     case HL_MATCH: return 34;   // return the ANSI code for "foreground blue"
@@ -494,18 +500,18 @@ int editorSyntaxToColor(int hl) {
 }
 
 // -----------------------------------------------------------------------------
-// we loop through each editorSyntax struct in the HLDB array, and for each one of those, we loop through each pattern in its filematch 
+// we loop through each languageSyntax struct in the languageDatabase array, and for each one of those, we loop through each pattern in its filematch 
 // array. If the pattern starts with a ., then it’s a file extension pattern, and we use strcmp() to see if the filename ends with that 
 // extension. If it’s not a file extension pattern, then we just check to see if the pattern exists anywhere in the filename, using 
-// strstr(). If the filename matched according to those rules, then we set Text.syntax to the current editorSyntax struct, and return.
+// strstr(). If the filename matched according to those rules, then we set Text.syntax to the current languageSyntax struct, and return.
 void editorSelectSyntaxHighlight() {
   Text.syntax = NULL;  // set Text.syntax to NULL, so that if nothing matches or if there is no filename, then there is no filetype
   if (Text.filename == NULL) return;
 
   char *ext = strrchr(Text.filename, '.');  // ext = extension - strrchr() returns a pointer to the last occurrence of a character in a string (so we can look at just the file extention) - if there is no extension, then ext will be NULL
 
-  for (unsigned int j = 0; j <HLDB_ENTRIES; j++) {  // loop  through each editorSyntax struct in the HLDB array
-    struct editorSyntax *s = &HLDB[j];
+  for (unsigned int j = 0; j <DATABASE_ENTRIES; j++) {  // loop  through each languageSyntax struct in the languageDatabase array
+    languageSyntax *s = &languageDatabase[j];
     unsigned int i = 0;
     while (s->filematch[i]) {  // loop through each pattern in its filematch array
       int is_ext = (s->filematch[i][0] == '.');
@@ -536,56 +542,56 @@ void editorSelectSyntaxHighlight() {
 // 888   T88b  "Y88888P"  888P     Y888       "Y88888P"  888        8888888888 888   T88b d88P     888     888     8888888 "Y88888P"  888    Y888  "Y8888P" 
 
 // -----------------------------------------------------------------------------
-// converts a chars index into a render index
-int editorRowCxToRx(textRow *row, int cursorXPosition) {
-  int renderXPosition = 0;
+// converts a characters index into a display index
+int convertToDisplayIndex(textRow *row, int cursorXPosition) {
+  int displayXPosition = 0;
   int j;
   for (j = 0; j < cursorXPosition; j++) {
-    if (row->chars[j] == '\t')
-      renderXPosition += (TAB_STOP - 1) - (renderXPosition % TAB_STOP);
-    renderXPosition++;
+    if (row->characters[j] == '\t')
+      displayXPosition += (TAB_WIDTH - 1) - (displayXPosition % TAB_WIDTH);
+    displayXPosition++;
   }
-  return renderXPosition;
+  return displayXPosition;
 }
 
 // -----------------------------------------------------------------------------
-// converts a render index into a chars index
-// To convert an renderXPosition into a cursorXPosition, we do pretty much the same thing when converting the other way: loop through the chars string, calculating the current renderXPosition value (cur_renderXPosition) as we go. But instead of stopping when we hit a particular cursorXPosition value and returning cur_renderXPosition, we want to stop when cur_renderXPosition hits the given renderXPosition value and return cursorXPosition
-int editorRowRxToCx(textRow *row, int renderXPosition) {
-  int cur_renderXPosition = 0;
+// converts a display index into a characters index
+// To convert an displayXPosition into a cursorXPosition, we do pretty much the same thing when converting the other way: loop through the characters string, calculating the current displayXPosition value (cur_displayXPosition) as we go. But instead of stopping when we hit a particular cursorXPosition value and returning cur_displayXPosition, we want to stop when cur_displayXPosition hits the given displayXPosition value and return cursorXPosition
+int convertToCharactersIndex(textRow *row, int displayXPosition) {
+  int cur_displayXPosition = 0;
   int cursorXPosition;
-  for (cursorXPosition = 0; cursorXPosition < row->size; cursorXPosition++) {
-    if (row->chars[cursorXPosition] == '\t')
-      cur_renderXPosition += (TAB_STOP - 1) - (cur_renderXPosition % TAB_STOP);
-    cur_renderXPosition++;
+  for (cursorXPosition = 0; cursorXPosition < row->length; cursorXPosition++) {
+    if (row->characters[cursorXPosition] == '\t')
+      cur_displayXPosition += (TAB_WIDTH - 1) - (cur_displayXPosition % TAB_WIDTH);
+    cur_displayXPosition++;
 
-    if (cur_renderXPosition > renderXPosition) return cursorXPosition;  // should handle all renderXPosition values that are valid indexes into render
+    if (cur_displayXPosition > displayXPosition) return cursorXPosition;  // should handle all displayXPosition values that are valid indexes into display
   }
-  return cursorXPosition;  // just in case the caller provided an renderXPosition that’s out of range, which shouldn’t happen
+  return cursorXPosition;  // just in case the caller provided an displayXPosition that’s out of range, which shouldn’t happen
 }
 
 // -----------------------------------------------------------------------------
-// uses the chars string of an textRow to fill in the contents of the render string - copy each character from chars to render
+// uses the characters string of an textRow to fill in the contents of the display string - copy each character from characters to display
 void editorUpdateRow(textRow *row) {
   int tabs = 0;
   int j;
-  for (j = 0; j < row->size; j++)
-    if (row->chars[j] == '\t') tabs++;
+  for (j = 0; j < row->length; j++)
+    if (row->characters[j] == '\t') tabs++;
 
-  free(row->render);
-  row->render = malloc(row->size + tabs*(TAB_STOP - 1) + 1);
+  free(row->display);
+  row->display = malloc(row->length + tabs*(TAB_WIDTH - 1) + 1);
 
   int idx = 0;
-  for (j = 0; j < row->size; j++) {
-    if (row->chars[j] == '\t') {
-      row->render[idx++] = ' ';
-      while (idx % TAB_STOP != 0) row->render[idx++] = ' ';
+  for (j = 0; j < row->length; j++) {
+    if (row->characters[j] == '\t') {
+      row->display[idx++] = ' ';
+      while (idx % TAB_WIDTH != 0) row->display[idx++] = ' ';
     } else {
-      row->render[idx++] = row->chars[j];
+      row->display[idx++] = row->characters[j];
     }
   }
-  row->render[idx] = '\0';
-  row->rsize = idx;
+  row->display[idx] = '\0';
+  row->displayLength = idx;
 
   editorUpdateSyntax(row);
 }
@@ -601,27 +607,27 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   Text.row[at].index = at;  // initialize idx to the row’s index in the file at the time it is inserted
 
-  Text.row[at].size = len;
-  Text.row[at].chars = malloc(len + 1);
-  memcpy(Text.row[at].chars, s, len);
-  Text.row[at].chars[len] = '\0';
+  Text.row[at].length = len;
+  Text.row[at].characters = malloc(len + 1);
+  memcpy(Text.row[at].characters, s, len);
+  Text.row[at].characters[len] = '\0';
 
-  Text.row[at].rsize = 0;
-  Text.row[at].render = NULL;
-  Text.row[at].hl = NULL;
-  Text.row[at].hl_open_comment = 0;  // should be FALSE
+  Text.row[at].displayLength = 0;
+  Text.row[at].display = NULL;
+  Text.row[at].highlight = NULL;
+  Text.row[at].commentLeftOpen = false;  // should be false
   editorUpdateRow(&Text.row[at]);
 
   Text.totalRows++;
-  Text.modified = TRUE;  // why not just set it to true? - and then set to false when save file
+  Text.modified = true;  // why not just set it to true? - and then set to false when save file
 }
 
 // -----------------------------------------------------------------------------
 //  frees memory owned by a row
 void editorFreeRow(textRow *row) {
-  free(row->render);
-  free(row->chars);
-  free(row->hl);
+  free(row->display);
+  free(row->characters);
+  free(row->highlight);
 }
 
 // -----------------------------------------------------------------------------
@@ -632,7 +638,7 @@ void editorDelRow(int at) {
   memmove(&Text.row[at], &Text.row[at + 1], sizeof(textRow) * (Text.totalRows - at - 1));  // use memmove() to overwrite the deleted row struct with the rest of the rows that come after it
   for (int j = at; j <= Text.totalRows - 1; j++) Text.row[j].index--;  // update the index of each row after the deleted row whenever a row is deleted from a file
   Text.totalRows--;  
-  Text.modified = TRUE;
+  Text.modified = true;
 }
 
 // -----------------------------------------------------------------------------
@@ -640,35 +646,35 @@ void editorDelRow(int at) {
 // int at - the index at which we want to insert the character (index to insert 'at'???)
 // int c - new character to insert
 void editorRowInsertChar(textRow *row, int at, int c) {
-  if (at < 0 || at > row->size) at = row->size;  // validate at - Notice that at is allowed to go one character past the end of the string, in which case the character should be inserted at the end of the string.
-  row->chars = realloc(row->chars, row->size + 2);  // Then we allocate one more byte for the chars of the textRow (we add 2 because we also have to make room for the null byte)
-  memmove(&row->chars[at + 1], &row->chars[at], row->size - at + 1);  // use memmove() to make room for the new character. move everything from index at to the end of the string over one character leaving a "hole" at index at.  memmove() comes from <string.h>. It is like memcpy(), but is safe to use when the source and destination arrays overlap.
-  row->size++;  // increment the size of the chars array, 
-  row->chars[at] = c;  // assign the character to its position in the array
-  editorUpdateRow(row);  // call editorUpdateRow() so that the render and rsize fields get updated with the new row content.
-  Text.modified = TRUE;  // why not just set it to true? - and then set to false when save file
+  if (at < 0 || at > row->length) at = row->length;  // validate at - Notice that at is allowed to go one character past the end of the string, in which case the character should be inserted at the end of the string.
+  row->characters = realloc(row->characters, row->length + 2);  // Then we allocate one more byte for the characters of the textRow (we add 2 because we also have to make room for the null byte)
+  memmove(&row->characters[at + 1], &row->characters[at], row->length - at + 1);  // use memmove() to make room for the new character. move everything from index at to the end of the string over one character leaving a "hole" at index at.  memmove() comes from <string.h>. It is like memcpy(), but is safe to use when the source and destination arrays overlap.
+  row->length++;  // increment the size of the characters array, 
+  row->characters[at] = c;  // assign the character to its position in the array
+  editorUpdateRow(row);  // call editorUpdateRow() so that the display and rsize fields get updated with the new row content.
+  Text.modified = true;  // why not just set it to true? - and then set to false when save file
 }
 
 // -----------------------------------------------------------------------------
 // appends a string to the end of a row
 void editorRowAppendString(textRow *row, char *s, size_t len) {
-  row->chars = realloc(row->chars, row->size + len + 1);  // The row’s new size is row->size + len + 1 (including the null byte), so first we allocate that much memory for row->chars
-  memcpy(&row->chars[row->size], s, len);
-  row->size += len;
-  row->chars[row->size] = '\0';
+  row->characters = realloc(row->characters, row->length + len + 1);  // The row’s new size is row->length + len + 1 (including the null byte), so first we allocate that much memory for row->characters
+  memcpy(&row->characters[row->length], s, len);
+  row->length += len;
+  row->characters[row->length] = '\0';
   editorUpdateRow(row);
-  Text.modified = TRUE;
+  Text.modified = true;
 }
 
 // -----------------------------------------------------------------------------
 // textRow *row - pointer to an textRow struct
 // int at - the index at which we want to insert the character (index to insert 'at'???)
 void editorRowDelChar(textRow *row, int at) {
-  if (at < 0 || at >= row->size) return;
-  memmove(&row->chars[at], &row->chars[at + 1], row->size - at);
-  row->size--;
+  if (at < 0 || at >= row->length) return;
+  memmove(&row->characters[at], &row->characters[at + 1], row->length - at);
+  row->length--;
   editorUpdateRow(row);
-  Text.modified = TRUE;
+  Text.modified = true;
 }
 
 /*** editor operations ***/  // This section will contain functions that we’ll call from editorProcessKeypress() when we’re mapping keypresses to various text editing operations
@@ -698,10 +704,10 @@ void editorInsertNewline() {
     editorInsertRow(Text.cursorYPosition, "", 0);  // insert a new blank row before the line the cursor is on
   } else {  // Otherwise, we have to split the line we’re on into two rows
     textRow *row = &Text.row[Text.cursorYPosition];  // assign a new pointer to the address of the first character of the text that will be moved down a row
-    editorInsertRow(Text.cursorYPosition + 1, &row->chars[Text.cursorXPosition], row->size - Text.cursorXPosition); // insert the text pointed to by row into a new line - calls editorUpdateRow()
+    editorInsertRow(Text.cursorYPosition + 1, &row->characters[Text.cursorXPosition], row->length - Text.cursorXPosition); // insert the text pointed to by row into a new line - calls editorUpdateRow()
     row = &Text.row[Text.cursorYPosition]; // reset row to the line that was truncated, because editorInsertRow() may have invalidated the pointer
-    row->size = Text.cursorXPosition;  // set the size equal to the x coordinate
-    row->chars[row->size] = '\0'; // add a null character to terminate the string in row->chars
+    row->length = Text.cursorXPosition;  // set the size equal to the x coordinate
+    row->characters[row->length] = '\0'; // add a null character to terminate the string in row->characters
     editorUpdateRow(row);  // update the row that was truncated
   }
   Text.cursorYPosition++;    // move the cursor to the beginning of the new row
@@ -720,8 +726,8 @@ void editorDelChar() {
     editorRowDelChar(row, Text.cursorXPosition - 1);
     Text.cursorXPosition--;
   } else {  // if (Text.cursorXPosition == 0) - if the cursor is at the beginning of the line of text, append the entire line to the previous line and reduce the size of
-    Text.cursorXPosition = Text.row[Text.cursorYPosition - 1].size;  // move the x coordniate of the cursor to the end of the previous row (while staying in the same row)
-    editorRowAppendString(&Text.row[Text.cursorYPosition - 1], row->chars, row->size);  // Append the contents of the line the cursor is on to the contents of the line above it
+    Text.cursorXPosition = Text.row[Text.cursorYPosition - 1].length;  // move the x coordniate of the cursor to the end of the previous row (while staying in the same row)
+    editorRowAppendString(&Text.row[Text.cursorYPosition - 1], row->characters, row->length);  // Append the contents of the line the cursor is on to the contents of the line above it
     editorDelRow(Text.cursorYPosition);  // delete the row the cursor is on
     Text.cursorYPosition--;  // move the cursor up one row to the position where the two lines were joined
   }
@@ -743,14 +749,14 @@ char *editorRowsToString(int *buflen) {
   int totlen = 0;
   int j;
   for (j = 0; j < Text.totalRows; j++)  // add up the lengths of each row of text, adding 1 to each one for the newline character we’ll add to the end of each line
-    totlen += Text.row[j].size + 1;
+    totlen += Text.row[j].length + 1;
   *buflen = totlen;  // save the total length into buflen, to tell the caller how long the string is
 
   char *buf = malloc(totlen);  // allocate the required memory for the string
   char *p = buf;  // set p to point at the same address as buf - this is so we increase the address p is pointing to as we copy characters while leaving buf point to the beginning address
   for (j = 0; j < Text.totalRows; j++) {  // loop through the rows
-    memcpy(p, Text.row[j].chars, Text.row[j].size);  // memcpy() the contents of each row to the end of the buffer
-    p += Text.row[j].size;  // advance the address being pointed at by the p pointer by the qty of characters added to the string
+    memcpy(p, Text.row[j].characters, Text.row[j].length);  // memcpy() the contents of each row to the end of the buffer
+    p += Text.row[j].length;  // advance the address being pointed at by the p pointer by the qty of characters added to the string
     *p = '\n';  // append a new line character after each row
     p++;  // advance the address being pointed at by the pointer by one to account for the newline character
   }
@@ -780,7 +786,7 @@ void editorOpen(char *filename) {
   }
   free(line);
   fclose(fp);
-  Text.modified = FALSE;  // reset the modified flag
+  Text.modified = false;  // reset the modified flag
 }
 
 // -----------------------------------------------------------------------------
@@ -804,7 +810,7 @@ void editorSave() {
       if (write(fd, buf, len) == len) {  // write the contents of buf to the file referenced by fd
         close(fd);
         free(buf);
-        Text.modified = FALSE;
+        Text.modified = false;
         editorSetStatusMessage("%d bytes written to disk", len);
         return;
       }
@@ -836,7 +842,7 @@ void editorFindCallback(char *query, int key) {
   static char *saved_hl = NULL;  // dynamically allocated array which points to NULL when there is nothing to restore
 
   if (saved_hl) {  // if there is something to restore
-    memcpy(Text.row[saved_hl_line].hl, saved_hl, Text.row[saved_hl_line].rsize);  // memcpy it to the saved line’s hl
+    memcpy(Text.row[saved_hl_line].highlight, saved_hl, Text.row[saved_hl_line].displayLength);  // memcpy it to the saved line’s hl
     free(saved_hl);  // deallocate saved_hl
     saved_hl = NULL;  // set it back to NULL - so we won't have a dangling pointer
   }
@@ -864,17 +870,17 @@ void editorFindCallback(char *query, int key) {
     else if (current == Text.totalRows) current = 0;  // if the end of the text is reached, wrap around to the first row
 
     textRow *row = &Text.row[current];  // set a pointer to the address of Text.row[i]
-    char *match = strstr(row->render, query);  // searches the row structure pointed to by row->render for the first occurence of query
+    char *match = strstr(row->display, query);  // searches the row structure pointed to by row->display for the first occurence of query
     if (match) {  // a match is found
       last_match = current;
       Text.cursorYPosition = current;  // set cursor to location of the match
-      Text.cursorXPosition = editorRowRxToCx(row, match - row->render); // set cursor to location of the match converted from a render index to a chars index
+      Text.cursorXPosition = convertToCharactersIndex(row, match - row->display); // set cursor to location of the match converted from a display index to a characters index
       Text.rowOffset = Text.totalRows;  // scroll the text row where the match was found to the top of the screen -  set Text.rowOffset so that we are scrolled to the very bottom of the file, which will cause editorScroll() to scroll upwards at the next screen refresh so that the matching line will be at the very top of the screen
       
       saved_hl_line = current;
-      saved_hl = malloc(row->rsize);
-      memcpy(saved_hl, row->hl, row->rsize);
-      memset(&row->hl[match - row->render], HL_MATCH, strlen(query));
+      saved_hl = malloc(row->displayLength);
+      memcpy(saved_hl, row->highlight, row->displayLength);
+      memset(&row->highlight[match - row->display], HL_MATCH, strlen(query));
       break;
     }
   }
@@ -953,9 +959,9 @@ void abFree(struct abuf *ab)
 // -----------------------------------------------------------------------------
 //  check if the cursor has moved outside of the visible window, and if so, adjust Text.rowOffset so that the cursor is just inside the visible window.
 void editorScroll() {
-  Text.renderXPosition = 0;
+  Text.displayXPosition = 0;
   if (Text.cursorYPosition < Text.totalRows) {
-    Text.renderXPosition = editorRowCxToRx(&Text.row[Text.cursorYPosition], Text.cursorXPosition);
+    Text.displayXPosition = convertToDisplayIndex(&Text.row[Text.cursorYPosition], Text.cursorXPosition);
   }
 
   if (Text.cursorYPosition < Text.rowOffset) {
@@ -964,11 +970,11 @@ void editorScroll() {
   if (Text.cursorYPosition >= Text.rowOffset + Text.screenRows) {
     Text.rowOffset = Text.cursorYPosition - Text.screenRows + 1;
   }
-  if (Text.renderXPosition < Text.columnOffset) {
-    Text.columnOffset = Text.renderXPosition;
+  if (Text.displayXPosition < Text.columnOffset) {
+    Text.columnOffset = Text.displayXPosition;
   }
-  if (Text.renderXPosition >= Text.columnOffset + Text.screenColumns) {
-    Text.columnOffset = Text.renderXPosition - Text.screenColumns + 1;
+  if (Text.displayXPosition >= Text.columnOffset + Text.screenColumns) {
+    Text.columnOffset = Text.displayXPosition - Text.screenColumns + 1;
   }
 }
 
@@ -982,7 +988,7 @@ void editorDrawRows(struct abuf *ab) {
       if (Text.totalRows == 0 && y == Text.screenRows / 3) {
         char welcome[80];
         int welcomelen = snprintf(welcome, sizeof(welcome),
-          "Text Editor -- version %s", MY_EDITOR_VERSION);
+          "Text Editor -- version %s", VERSION);
         if (welcomelen > Text.screenColumns) {
           welcomelen = Text.screenColumns;
         }
@@ -997,11 +1003,11 @@ void editorDrawRows(struct abuf *ab) {
         abAppend(ab, "~", 1);
       }
     } else {
-      int len = Text.row[filtextRow].rsize - Text.columnOffset;
+      int len = Text.row[filtextRow].displayLength - Text.columnOffset;
       if (len < 0) len = 0;
       if (len > Text.screenColumns) len = Text.screenColumns;
-      char *c = &Text.row[filtextRow].render[Text.columnOffset];
-      unsigned char *hl = &Text.row[filtextRow].hl[Text.columnOffset];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of render that we are printing
+      char *c = &Text.row[filtextRow].display[Text.columnOffset];
+      byte *hl = &Text.row[filtextRow].highlight[Text.columnOffset];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of display that we are printing
       int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {  // for every character 
@@ -1022,7 +1028,7 @@ void editorDrawRows(struct abuf *ab) {
           }
           abAppend(ab, &c[j], 1);  // append the character
         } else {  // if the character does not get normal highlighting 
-          int color = editorSyntaxToColor(hl[j]);  // get color to highlight
+          int color = languageSyntaxToColor(hl[j]);  // get color to highlight
           if (color != current_color) {
             current_color = color;
             char buf[16];
@@ -1096,7 +1102,7 @@ void editorRefreshScreen() {
 
   char buf[32];
   snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (Text.cursorYPosition - Text.rowOffset) + 1,
-                                            (Text.renderXPosition - Text.columnOffset) + 1);
+                                            (Text.displayXPosition - Text.columnOffset) + 1);
   abAppend(&ab, buf, strlen(buf));
 
   abAppend(&ab, "\x1b[?25h", 6);  // reset mode escape sequence - show cursor
@@ -1175,7 +1181,7 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {  // The prompt
         if (callback) callback(buf, c);  // the if (callback) allows the caller to pass NULL for the callback, in case they don't want to use the callback
         return buf;  // return the file name entered
       }
-    } else if (!iscntrl(c) && c < 128) {  // Otherwise, when they input a printable character (not a control character and not a charcter value above 128 - so no characters in our editorKey enum), we append it to buf - Notice that we have to make sure the input key isn’t one of the special keys in the editorKey enum, which have high integer values. To do that, we test whether the input key is in the range of a char by making sure it is less than 128.
+    } else if (!iscntrl(c) && c < 128) {  // Otherwise, when they input a printable character (not a control character and not a charcter value above 128 - so no characters in our specialKeys enum), we append it to buf - Notice that we have to make sure the input key isn’t one of the special keys in the specialKeys enum, which have high integer values. To do that, we test whether the input key is in the range of a char by making sure it is less than 128.
       if (buflen == bufsize - 1) {    // If buflen has reached the maximum capacity we allocated (stored in bufsize) 
         bufsize *= 2;                 // then we double bufsize
         buf = realloc(buf, bufsize);  // and allocate that amount of memory before appending to buf
@@ -1198,13 +1204,13 @@ void editorMoveCursor(int key) {
         Text.cursorXPosition--;
       } else if (Text.cursorYPosition > 0) {
         Text.cursorYPosition--;
-        Text.cursorXPosition = Text.row[Text.cursorYPosition].size;
+        Text.cursorXPosition = Text.row[Text.cursorYPosition].length;
       }
       break;
     case ARROW_RIGHT:
-      if (row && Text.cursorXPosition < row->size) {
+      if (row && Text.cursorXPosition < row->length) {
         Text.cursorXPosition++;
-      } else if (row && Text.cursorXPosition == row->size) {
+      } else if (row && Text.cursorXPosition == row->length) {
         Text.cursorYPosition++;
         Text.cursorXPosition = 0;
       }
@@ -1222,7 +1228,7 @@ void editorMoveCursor(int key) {
   }
 
   row = (Text.cursorYPosition >= Text.totalRows) ? NULL : &Text.row[Text.cursorYPosition];
-  int rowlen = row ? row->size : 0;
+  int rowlen = row ? row->length : 0;
   if (Text.cursorXPosition > rowlen) {
     Text.cursorXPosition = rowlen;
   }
@@ -1231,7 +1237,7 @@ void editorMoveCursor(int key) {
 // -----------------------------------------------------------------------------
 // waits for a keypress and handles it
 void editorProcessKeypress() {
-  static int quit_times = QUIT_TIMES;
+  static int quit_times = TIMES_TO_QUIT;
 
   int c = editorReadKey();
 
@@ -1262,7 +1268,7 @@ void editorProcessKeypress() {
 
     case END_KEY:
       if (Text.cursorYPosition < Text.totalRows)
-        Text.cursorXPosition = Text.row[Text.cursorYPosition].size;
+        Text.cursorXPosition = Text.row[Text.cursorYPosition].length;
       break;
 
     case CTRL_KEY('f'):
@@ -1308,7 +1314,7 @@ void editorProcessKeypress() {
       break;
   }  // END: switch (c)
 
-  quit_times = QUIT_TIMES;
+  quit_times = TIMES_TO_QUIT;
 }
 
 /*** init ***/
@@ -1326,12 +1332,12 @@ void editorProcessKeypress() {
 void initEditor() {
   Text.cursorXPosition = 0;
   Text.cursorYPosition = 0;
-  Text.renderXPosition = 0;
+  Text.displayXPosition = 0;
   Text.rowOffset = 0;  // we'll be scrolled to the top of the file by default
   Text.columnOffset = 0;  // we'll be scrolled to the left of the file by default
   Text.totalRows = 0;
   Text.row = NULL;
-  Text.modified = FALSE;
+  Text.modified = false;
   Text.filename = NULL;
   Text.statusMessage[0] = '\0';
   Text.statusMessage_time = 0;
