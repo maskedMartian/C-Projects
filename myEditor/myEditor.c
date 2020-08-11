@@ -76,7 +76,18 @@ enum specialKeys {
   PAGE_DOWN
 };
 
-enum textHighlightColors {  // enum of highlight colors
+enum foregroundColors = {
+    BLACK = 30,
+    RED,
+    GREEN,
+    YELLOW,
+    BLUE,
+    MAGENTA,  // violet
+    CYAN,     // aqua
+    WHITE
+};
+
+enum textColors {  // enum of highlight colors
   HL_NORMAL = 0,
   HL_COMMENT,
   HL_MULTILINE_COMMENT,
@@ -87,20 +98,20 @@ enum textHighlightColors {  // enum of highlight colors
   HL_MATCH
 };
 
-#define HIGHLIGHT_NUMBERS        1   // For now, we define just the HIGHLIGHT_NUMBERS flag bit.
-#define HIGHLIGHT_STRINGS  (1 << 1)  // Now let’s add an HIGHLIGHT_STRINGS bit flag to the flags field of the languageSyntax struct, and turn on the flag when highlighting C files.
+#define COLOR_NUMBERS        1   // For now, we define just the COLOR_NUMBERS flag bit.
+#define COLOR_STRINGS  (1 << 1)  // Now let’s add an COLOR_STRINGS bit flag to the flags field of the syntaxInfo struct, and turn on the flag when highlighting C files.
 
 /*** data ***/
 
-typedef struct languageSyntax {
+typedef struct syntaxInfo {
   char *filetype,    // the name of the filetype that will be displayed to the user in the status bar
        **filematch,  //  an array of strings, where each string contains a pattern to match a filename against - If the filename matches, then the file will be recognized as having that filetype
        **keywords,  // an array of strings to hold programming language keywords
-       *commentStart,  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a commentStart string to the languageSyntax struct, and set it to "//" for the C filetype. 
+       *commentStart,  // We’ll let each language specify its own single-line comment pattern, as they differ a lot between languages. Let’s add a commentStart string to the syntaxInfo struct, and set it to "//" for the C filetype. 
        *blockCommentStart,
        *blockCommentEnd;
-  int flags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
-} languageSyntax;
+  int colorFlags;         // a bit field that will contain flags for whether to highlight numbers and whether to highlight strings for that filetype
+} syntaxInfo;
 
 typedef unsigned char byte;
 
@@ -128,7 +139,7 @@ typedef struct textBuffer {  // global editor state
   char *filename,  // Name of the file being edited
        statusMessage[80];  // holds an 80 character message to the user displayed on the status bar.
   time_t statusMessage_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
-  languageSyntax *syntax;  // a pointer to the current languageSyntax struct in the global editor state
+  syntaxInfo *syntax;  // a pointer to the current syntaxInfo struct in the global editor state
   struct termios originalTerminalState;  // structure to hold the original state of the terminal when our program began, before we started altering its state
 } textBuffer;
 
@@ -145,7 +156,7 @@ char *C_keywords[] = {
   "void|", NULL
 };
 
-languageSyntax languageDatabase[] = {  // languageDatabase stands for “highlight database” - it's an array of languageSyntax structs
+syntaxInfo syntaxDatabase[] = {  // syntaxDatabase stands for “highlight database” - it's an array of syntaxInfo structs
   {
     "c",  // filetype field
     C_fileExtensions,  // filematch field
@@ -153,11 +164,11 @@ languageSyntax languageDatabase[] = {  // languageDatabase stands for “highlig
     "//",  // singleline_comment_ start field
     "/*",
     "*/",
-    HIGHLIGHT_NUMBERS | HIGHLIGHT_STRINGS  // flags field
+    COLOR_NUMBERS | COLOR_STRINGS  // flags field
   },
 };
 
-#define DATABASE_ENTRIES (sizeof(languageDatabase) / sizeof(languageDatabase[0]))  // define an DATABASE_ENTRIES constant to store the length of the languageDatabase array
+#define DATABASE_ENTRIES (sizeof(syntaxDatabase) / sizeof(syntaxDatabase[0]))  // define an DATABASE_ENTRIES constant to store the length of the syntaxDatabase array
 
 /*** prototypes ***/
 // 8888888b.  8888888b.   .d88888b. 88888888888 .d88888b. 88888888888 Y88b   d88P 8888888b.  8888888888 .d8888b.  
@@ -402,11 +413,6 @@ void editorUpdateSyntax(textRow *row) {
       }
     }
 
-/*   First we add an in_comment boolean variable to keep track of whether we’re currently inside a multi-line comment (this variable isn’t used for single-line comments).
-Moving down into the while loop, we require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting. We also check to make sure we’re not in a string, because having (/ *) inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages.
-If we’re currently in a multi-line comment, then we can safely highlight the current character with HL_MULTILINE_COMMENT. Then we check if we’re at the end of a multi-line comment by using strncmp() with mce. If so, we use memset() to highlight the whole mce string with HL_MULTILINE_COMMENT, and then we consume it. If we’re not at the end of the comment, we simply consume the current character which we already highlighted.
-If we’re not currently in a multi-line comment, then we use strncmp() with mcs to check if we’re at the beginning of a multi-line comment. If so, we use memset() to highlight the whole mcs string with HL_MULTILINE_COMMENT, set in_comment to true, and consume the whole mcs string.
-*/ 
     // code for highlighting /* C */ style comments
     if (mcs_len && mce_len && !in_string) {  // require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting - check to make sure we’re not in a string, because having /* inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages
       if (in_comment) {  // If we’re currently in a multi-line comment,
@@ -431,7 +437,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
 
     // We will use an in_string variable to keep track of whether we are currently inside a string. If we are, then we’ll keep 
     // highlighting the current character as a string until we hit the closing quote.
-    if (Text.syntax->flags & HIGHLIGHT_STRINGS) {
+    if (Text.syntax->colorFlags & COLOR_STRINGS) {
       if (in_string) {
         row->textColor[i] = HL_STRING;
         if (c == '\\' && i + 1 < row->displayLength) {  // If we’re in a string and the current character is a backslash (\), and there’s at least one more character in that line that comes after the backslash, then we highlight the character that comes after the backslash with HL_STRING and consume it. We increment i by 2 to consume both characters at once.
@@ -454,7 +460,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
     }
 
 
-    if (Text.syntax->flags & HIGHLIGHT_NUMBERS) {
+    if (Text.syntax->colorFlags & COLOR_NUMBERS) {
       // right now this will highlight all periods in 3.....4 - do I want it to do that?
       if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
           (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
@@ -499,7 +505,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
 
 // -----------------------------------------------------------------------------
 //
-int languageSyntaxToColor(int hl) {
+int syntaxInfoToColor(int hl) {
   switch (hl) {
     case HL_COMMENT: 
     case HL_MULTILINE_COMMENT: return 36; // return the ANSI code for "foreground cyan"
@@ -513,18 +519,18 @@ int languageSyntaxToColor(int hl) {
 }
 
 // -----------------------------------------------------------------------------
-// we loop through each languageSyntax struct in the languageDatabase array, and for each one of those, we loop through each pattern in its filematch 
+// we loop through each syntaxInfo struct in the syntaxDatabase array, and for each one of those, we loop through each pattern in its filematch 
 // array. If the pattern starts with a ., then it’s a file extension pattern, and we use strcmp() to see if the filename ends with that 
 // extension. If it’s not a file extension pattern, then we just check to see if the pattern exists anywhere in the filename, using 
-// strstr(). If the filename matched according to those rules, then we set Text.syntax to the current languageSyntax struct, and return.
+// strstr(). If the filename matched according to those rules, then we set Text.syntax to the current syntaxInfo struct, and return.
 void editorSelectSyntaxHighlight() {
   Text.syntax = NULL;  // set Text.syntax to NULL, so that if nothing matches or if there is no filename, then there is no filetype
   if (Text.filename == NULL) return;
 
   char *ext = strrchr(Text.filename, '.');  // ext = extension - strrchr() returns a pointer to the last occurrence of a character in a string (so we can look at just the file extention) - if there is no extension, then ext will be NULL
 
-  for (unsigned int j = 0; j <DATABASE_ENTRIES; j++) {  // loop  through each languageSyntax struct in the languageDatabase array
-    languageSyntax *s = &languageDatabase[j];
+  for (unsigned int j = 0; j <DATABASE_ENTRIES; j++) {  // loop  through each syntaxInfo struct in the syntaxDatabase array
+    syntaxInfo *s = &syntaxDatabase[j];
     unsigned int i = 0;
     while (s->filematch[i]) {  // loop through each pattern in its filematch array
       int is_ext = (s->filematch[i][0] == '.');
@@ -1041,7 +1047,7 @@ void editorDrawRows(struct abuf *ab) {
           }
           abAppend(ab, &c[j], 1);  // append the character
         } else {  // if the character does not get normal highlighting 
-          int color = languageSyntaxToColor(hl[j]);  // get color to highlight
+          int color = syntaxInfoToColor(hl[j]);  // get color to highlight
           if (color != current_color) {
             current_color = color;
             char buf[16];
