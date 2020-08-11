@@ -17,6 +17,19 @@ the text color back to normal.
 
 */
 
+
+//==============================================================================
+// FUNCTION:    xxx
+// DESCRIPTION: xxx
+// INPUT:       Parameters:   xxx
+//              File:         xxx
+// OUTPUT:      Return Value: xxx
+//              Parameters:   xxx
+//              File:         xxx
+//  CALLS TO:   xxx, xxx, xxx
+//==============================================================================
+
+
 // Small changes
 
 /*** includes ***/
@@ -74,7 +87,7 @@ enum textHighlightColors {  // enum of highlight colors
   HL_MATCH
 };
 
-#define HIGHLIGHT_NUMBERS       (1)  // For now, we define just the HIGHLIGHT_NUMBERS flag bit.
+#define HIGHLIGHT_NUMBERS        1   // For now, we define just the HIGHLIGHT_NUMBERS flag bit.
 #define HIGHLIGHT_STRINGS  (1 << 1)  // Now let’s add an HIGHLIGHT_STRINGS bit flag to the flags field of the languageSyntax struct, and turn on the flag when highlighting C files.
 
 /*** data ***/
@@ -97,7 +110,7 @@ typedef struct textRow {  // the typedef lets us refer to the type as "textRow" 
       displayLength;  // the quantity of elements in the *display array
   char *characters,  // pointer to a dynamically allocated array that holds all the characters in a single row of text as read from a file
        *display;  // pointer to a dynamically allocated array that holds all the characters in a single row of text as they are displayed on the screen
-  byte *highlight;  // "highlight" - an array to store the highlighting characteristics of each character
+  byte *textColor;  // "highlight" - an array to store the highlighting characteristics of each character
   bool commentLeftOpen;  // variable type/name should be BOOLEAN hasUnclosedMultilineComment 
 } textRow;  // stores a line of text as a pointer to the dynamically-allocated character data and a length
 
@@ -355,8 +368,8 @@ int is_separator(int c) {  // this function should be type Boolean
 // -----------------------------------------------------------------------------
 // Might not need int prev_sep - maybe just use function? OR maybe keep track of what type of char the prev char was - not just separartor, but number, or other too???
 void editorUpdateSyntax(textRow *row) {
-  row->highlight = realloc(row->highlight, row->displayLength);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
-  memset(row->highlight, HL_NORMAL, row->displayLength);  // use memset() to set all characters to HL_NORMAL by default
+  row->textColor = realloc(row->textColor, row->displayLength);  // First we realloc() the needed memory, since this might be a new row or the row might be bigger than the last time we highlighted it.
+  memset(row->textColor, HL_NORMAL, row->displayLength);  // use memset() to set all characters to HL_NORMAL by default
 
   if (Text.syntax == NULL) return;
 
@@ -380,11 +393,11 @@ void editorUpdateSyntax(textRow *row) {
   int i = 0;
   while (i < row->length) {  // loop through the characters
     char c = row->display[i];
-    byte prev_hl = (i > 0) ? row->highlight[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
+    byte prev_hl = (i > 0) ? row->textColor[i - 1] : HL_NORMAL;  // set to the highlight type of the previous character if not the beginning of the line
 
     if (scs_len && !in_string && !in_comment) {  // So we wrap our comment highlighting code in an if statement that checks scs_len and also makes sure we’re not in a string and not in a multiline comment, since we’re placing this code above the string highlighting code (order matters a lot in this function)
       if (!strncmp(&row->display[i], scs, scs_len)) {  //  use strncmp() to check if this character is the start of a single-line comment
-        memset(&row->highlight[i], HL_COMMENT, row->displayLength - i);  // simply memset() the whole rest of the line with HL_COMMENT
+        memset(&row->textColor[i], HL_COMMENT, row->displayLength - i);  // simply memset() the whole rest of the line with HL_COMMENT
         break;  // break out of the syntax highlighting loop
       }
     }
@@ -397,9 +410,9 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
     // code for highlighting /* C */ style comments
     if (mcs_len && mce_len && !in_string) {  // require both mcs and mce to be non-NULL strings of length greater than 0 in order to turn on multi-line comment highlighting - check to make sure we’re not in a string, because having /* inside a string doesn’t start a comment in most languages. Okay, I’ll say it: all languages
       if (in_comment) {  // If we’re currently in a multi-line comment,
-        row->highlight[i] = HL_MULTILINE_COMMENT;  // highlight the current character with HL_MULTILINE_COMMENT
+        row->textColor[i] = HL_MULTILINE_COMMENT;  // highlight the current character with HL_MULTILINE_COMMENT
         if (!strncmp(&row->display[i], mce, mce_len)) {  // if character == */ - check if we’re at the end of a multi-line comment by using strncmp() with mce
-          memset(&row->highlight[i], HL_MULTILINE_COMMENT, mce_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+          memset(&row->textColor[i], HL_MULTILINE_COMMENT, mce_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
           i += mce_len;  // consume both characters by adding to length (i)
           in_comment = false;  // set to false because we are out of the comment
           prev_sep = 1;  // set prev_sep to true because the end of a comment is considered a separator character
@@ -409,7 +422,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
           continue;  // continue to the next iteration of the while loop
         }
       } else if (!strncmp(&row->display[i], mcs, mcs_len)) {  // not in multiline comment - if at the beginning of a multiline comment
-        memset(&row->highlight[i], HL_MULTILINE_COMMENT, mcs_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
+        memset(&row->textColor[i], HL_MULTILINE_COMMENT, mcs_len);  // use memset to set both chararters of multiline comment terminator to multiline comment highlight color
         i += mcs_len;  // consume both characters by adding to length (i)
         in_comment = true;  // set to true because we are now inside a multiline comment
         continue;   // continue to the next iteration of the while loop
@@ -420,9 +433,9 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
     // highlighting the current character as a string until we hit the closing quote.
     if (Text.syntax->flags & HIGHLIGHT_STRINGS) {
       if (in_string) {
-        row->highlight[i] = HL_STRING;
+        row->textColor[i] = HL_STRING;
         if (c == '\\' && i + 1 < row->displayLength) {  // If we’re in a string and the current character is a backslash (\), and there’s at least one more character in that line that comes after the backslash, then we highlight the character that comes after the backslash with HL_STRING and consume it. We increment i by 2 to consume both characters at once.
-          row->highlight[i + 1] = HL_STRING;
+          row->textColor[i + 1] = HL_STRING;
           i += 2;
           continue;
         }
@@ -433,7 +446,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
       } else {
         if (c == '"' || c == '\'') {  // if a string opens -  we highlight both double-quoted strings and single-quoted strings
           in_string = c;  // store the character so we know what the closing character will be - single or double quotes
-          row->highlight[i] = HL_STRING;
+          row->textColor[i] = HL_STRING;
           i++;
           continue;
         }
@@ -445,7 +458,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
       // right now this will highlight all periods in 3.....4 - do I want it to do that?
       if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) || // if the char is a number AND the previous char was a separator or a number
           (c == '.' && prev_hl == HL_NUMBER)) {                 // OR the current character is a period and the previous character was a number
-        row->highlight[i] = HL_NUMBER;  // set the digits to HL_NUMBER
+        row->textColor[i] = HL_NUMBER;  // set the digits to HL_NUMBER
         i++; // increment I since we are continuing the loop
         prev_sep = 0;  // reset prev_sep since the current char is not a separator
         continue;
@@ -462,7 +475,7 @@ If we’re not currently in a multi-line comment, then we use strncmp() with mcs
 
         if (!strncmp(&row->display[i], keywords[j], klen) &&  // if the word in the display array matches the current keyword being checked  
             is_separator(row->display[i + klen])) {  // if the character after the keyword in the display array is a separator
-          memset(&row->highlight[i], kw2 ? HL_TYPE : HL_KEYWORD, klen);  // use memeset to set the correct number (length of keyword) of bytes in the hl array to the correct highlight color
+          memset(&row->textColor[i], kw2 ? HL_TYPE : HL_KEYWORD, klen);  // use memeset to set the correct number (length of keyword) of bytes in the hl array to the correct highlight color
         i += klen;  // consume all the characters of the keyword
         break;  // end the for loop once a keyword has been found and highlighted
         }
@@ -614,7 +627,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   Text.row[at].displayLength = 0;
   Text.row[at].display = NULL;
-  Text.row[at].highlight = NULL;
+  Text.row[at].textColor = NULL;
   Text.row[at].commentLeftOpen = false;  // should be false
   editorUpdateRow(&Text.row[at]);
 
@@ -627,7 +640,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 void editorFreeRow(textRow *row) {
   free(row->display);
   free(row->characters);
-  free(row->highlight);
+  free(row->textColor);
 }
 
 // -----------------------------------------------------------------------------
@@ -842,7 +855,7 @@ void editorFindCallback(char *query, int key) {
   static char *saved_hl = NULL;  // dynamically allocated array which points to NULL when there is nothing to restore
 
   if (saved_hl) {  // if there is something to restore
-    memcpy(Text.row[saved_hl_line].highlight, saved_hl, Text.row[saved_hl_line].displayLength);  // memcpy it to the saved line’s hl
+    memcpy(Text.row[saved_hl_line].textColor, saved_hl, Text.row[saved_hl_line].displayLength);  // memcpy it to the saved line’s hl
     free(saved_hl);  // deallocate saved_hl
     saved_hl = NULL;  // set it back to NULL - so we won't have a dangling pointer
   }
@@ -879,8 +892,8 @@ void editorFindCallback(char *query, int key) {
       
       saved_hl_line = current;
       saved_hl = malloc(row->displayLength);
-      memcpy(saved_hl, row->highlight, row->displayLength);
-      memset(&row->highlight[match - row->display], HL_MATCH, strlen(query));
+      memcpy(saved_hl, row->textColor, row->displayLength);
+      memset(&row->textColor[match - row->display], HL_MATCH, strlen(query));
       break;
     }
   }
@@ -1007,7 +1020,7 @@ void editorDrawRows(struct abuf *ab) {
       if (len < 0) len = 0;
       if (len > Text.screenColumns) len = Text.screenColumns;
       char *c = &Text.row[filtextRow].display[Text.columnOffset];
-      byte *hl = &Text.row[filtextRow].highlight[Text.columnOffset];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of display that we are printing
+      byte *hl = &Text.row[filtextRow].textColor[Text.columnOffset];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of display that we are printing
       int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {  // for every character 
