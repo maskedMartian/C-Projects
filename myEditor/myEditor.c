@@ -76,7 +76,7 @@ enum specialKeys {
   PAGE_DOWN
 };
 
-enum foregroundColors = {
+enum foregroundColors {
     BLACK = 30,
     RED,
     GREEN,
@@ -1026,7 +1026,7 @@ void editorDrawRows(struct abuf *ab) {
       if (len < 0) len = 0;
       if (len > Text.screenColumns) len = Text.screenColumns;
       char *c = &Text.row[filtextRow].display[Text.columnOffset];
-      byte *hl = &Text.row[filtextRow].textColor[Text.columnOffset];  // a pointer, hl, to the slice of the hl array that corresponds to the slice of display that we are printing
+      byte *textColor = &Text.row[filtextRow].textColor[Text.columnOffset];  // a pointer, textColor, to the slice of the textColor array that corresponds to the slice of display that we are printing
       int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {  // for every character 
@@ -1040,14 +1040,14 @@ void editorDrawRows(struct abuf *ab) {
             int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);  // clen is c length
             abAppend(ab, buf, clen);
           }
-        } else if (hl[j] == HL_NORMAL) {  // if the character gets normal highlighting
+        } else if (textColor[j] == HL_NORMAL) {  // if the character gets normal highlighting
           if (current_color != -1) {
             abAppend(ab, "\x1b[39m", 5);  // append an escaspe sequence for NORMAL coloring
             current_color = -1;
           }
           abAppend(ab, &c[j], 1);  // append the character
         } else {  // if the character does not get normal highlighting 
-          int color = syntaxInfoToColor(hl[j]);  // get color to highlight
+          int color = syntaxInfoToColor(textColor[j]);  // get color to highlight
           if (color != current_color) {
             current_color = color;
             char buf[16];
