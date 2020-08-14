@@ -76,26 +76,34 @@ enum specialKeys {
   PAGE_DOWN
 };
 
-enum foregroundColors {
+enum foregroundColors {  // ANSI foreground color codes
     BLACK = 30,
-    RED,
-    GREEN,
-    YELLOW,
-    BLUE,
-    MAGENTA,  // violet
-    CYAN,     // aqua
-    WHITE
+    RED,  // light rec
+    GREEN,  // green
+    YELLOW,  // mustard
+    BLUE,  // azure blue
+    MAGENTA,  // purple
+    CYAN,     // sky blue
+    WHITE,  // light gray
+    GRAY = 90,  // dark grey
+    BRIGHT_RED,  // dark red
+    BRIGHT_GREEN,  // lime green
+    BRIGHT_YELLOW,  // yellow
+    BRIGHT_BLUE,  // royal blue
+    BRIGHT_MAGENTA,  // violet
+    BRIGHT_CYAN,  // aqua
+    BRIGHT_WHITE  // white
 };
 
 enum textColors {  // enum of highlight colors
-  HL_NORMAL = 0,
-  HL_COMMENT,
-  HL_MULTILINE_COMMENT,
-  HL_KEYWORD,
-  HL_TYPE,
-  HL_STRING,
-  HL_NUMBER,
-  HL_MATCH
+  HL_NORMAL            = BRIGHT_WHITE,
+  HL_COMMENT           = GRAY,
+  HL_MULTILINE_COMMENT = GRAY,
+  HL_KEYWORD           = MAGENTA,
+  HL_TYPE              = BRIGHT_CYAN,
+  HL_STRING            = BRIGHT_YELLOW,
+  HL_NUMBER            = BRIGHT_BLUE,
+  HL_MATCH             = BRIGHT_GREEN
 };
 
 #define COLOR_NUMBERS        1   // For now, we define just the COLOR_NUMBERS flag bit.
@@ -149,11 +157,12 @@ textBuffer Text;
 
 char *C_fileExtensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
 char *C_keywords[] = {
-  "switch", "if", "while", "for", "break", "continue", "return", "else",
-  "struct", "union", "typedef", "static", "enum", "class", "case",
+  "switch", "if", "while", "for", "break", "continue", "return", "else", 
+  "static", "class", "case", "#include", "#define", "#undef", "#ifdef", 
+  "#ifndef", "#if", "#else", "#elif", "#endif", "#error", "#pragma",
 
   "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",  // type keywords are each ended with a | character and treated as secondary keywords
-  "void|", NULL
+  "void|", "enum|", "struct|", "union|", "typedef|", NULL
 };
 
 syntaxInfo syntaxDatabase[] = {  // syntaxDatabase stands for “highlight database” - it's an array of syntaxInfo structs
@@ -503,20 +512,6 @@ void editorUpdateSyntax(textRow *row) {
     editorUpdateSyntax(&Text.row[row->index + 1]);  // recursive call to editorUpdateSyntax with next row as arguement - this will update the syntax of every row after this one until the end of the file if this line ended in an open line comment
 }  // rework this without the continue and remove the second incrementation of i
 
-// -----------------------------------------------------------------------------
-//
-int syntaxInfoToColor(int hl) {
-  switch (hl) {
-    case HL_COMMENT: 
-    case HL_MULTILINE_COMMENT: return 36; // return the ANSI code for "foreground cyan"
-    case HL_KEYWORD: return 33;  // return the ANSI code for "foreground yellow"
-    case HL_TYPE: return 32;  // return the ANSI code for "foreground green"
-    case HL_STRING: return 35;  // return the ANSI code for "foreground magenta"
-    case HL_NUMBER: return 31;  // return the ANSI code for "foreground red"
-    case HL_MATCH: return 34;   // return the ANSI code for "foreground blue"
-    default: return 37;         // return the ANSI code for "foreground white"
-  }
-}
 
 // -----------------------------------------------------------------------------
 // we loop through each syntaxInfo struct in the syntaxDatabase array, and for each one of those, we loop through each pattern in its filematch 
@@ -1047,7 +1042,7 @@ void editorDrawRows(struct abuf *ab) {
           }
           abAppend(ab, &c[j], 1);  // append the character
         } else {  // if the character does not get normal highlighting 
-          int color = syntaxInfoToColor(textColor[j]);  // get color to highlight
+          int color = textColor[j];  // get color to highlight
           if (color != current_color) {
             current_color = color;
             char buf[16];
