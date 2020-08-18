@@ -158,8 +158,8 @@ textBuffer Text;
 char *C_fileExtensions[] = { ".c", ".h", ".cpp", NULL };  // an array of strings - must be terminated with NULL
 char *C_keywords[] = {
   "switch", "if", "while", "for", "break", "continue", "return", "else", 
-  "static", "class", "case", "#include", "#define", "#undef", "#ifdef", 
-  "#ifndef", "#if", "#else", "#elif", "#endif", "#error", "#pragma",
+  "static", "case", "#include", "#define", "#undef", "#ifdef", "#ifndef", 
+  "#if", "#else", "#elif", "#endif", "#error", "#pragma",
 
   "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",  // type keywords are each ended with a | character and treated as secondary keywords
   "void|", "enum|", "struct|", "union|", "typedef|", NULL
