@@ -165,6 +165,8 @@ char *C_keywords[] = {
   "void|", "enum|", "struct|", "union|", "typedef|", NULL
 };
 
+// putting this commnet here just so there will be a change for the stuff branch
+
 syntaxInfo syntaxDatabase[] = {  // syntaxDatabase stands for “highlight database” - it's an array of syntaxInfo structs
   {
     "c",  // filetype field
