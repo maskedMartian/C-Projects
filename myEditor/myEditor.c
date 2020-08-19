@@ -165,8 +165,6 @@ char *C_keywords[] = {
   "void|", "enum|", "struct|", "union|", "typedef|", NULL
 };
 
-// putting this commnet here just so there will be a change for the stuff branch
-
 syntaxInfo syntaxDatabase[] = {  // syntaxDatabase stands for “highlight database” - it's an array of syntaxInfo structs
   {
     "c",  // filetype field
@@ -191,7 +189,7 @@ syntaxInfo syntaxDatabase[] = {  // syntaxDatabase stands for “highlight datab
 // 888        888  T88b  Y88b. .d88P    888    Y88b. .d88P    888         888     888        888       Y88b  d88P 
 // 888        888   T88b  "Y88888P"     888     "Y88888P"     888         888     888        8888888888 "Y8888P" 
 
-void editorSetStatusMessage(const char *fmt, ...);
+void generateStatusMessage(const char *, ...);
 void editorRefreshScreen();
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
 
@@ -811,7 +809,7 @@ void editorSave() {
   if (Text.filename == NULL) {
     Text.filename = editorPrompt("Save as: %s (ESC x 3 to cancel)", NULL);
     if (Text.filename == NULL) {  // pressing ESC causes editorPrompt to return NULL
-      editorSetStatusMessage("Save aborted");
+      generateStatusMessage("Save aborted");
       return;
     }
     editorSelectSyntaxHighlight();
@@ -827,7 +825,7 @@ void editorSave() {
         close(fd);
         free(buf);
         Text.modified = false;
-        editorSetStatusMessage("%d bytes written to disk", len);
+        generateStatusMessage("%d bytes written to disk", len);
         return;
       }
     }
@@ -835,7 +833,7 @@ void editorSave() {
   }
 
   free(buf);
-  editorSetStatusMessage("Can't save! I/O error: %s", strerror(errno));
+  generateStatusMessage("Can't save! I/O error: %s", strerror(errno));
 }
 
 /*** find ***/
@@ -1151,13 +1149,23 @@ void editorRefreshScreen()
 }
 #endif
 
-// -----------------------------------------------------------------------------
-void editorSetStatusMessage(const char *fmt, ...) {
-  va_list ap;
-  va_start(ap, fmt);
-  vsnprintf(Text.statusMessage, sizeof(Text.statusMessage), fmt, ap);
-  va_end(ap);
-  Text.statusMessage_time = time(NULL);
+//==============================================================================
+// FUNCTION:    generateStatusMessage()
+// DESCRIPTION: xxx
+// INPUT:       Parameters:   xxx
+//              File:         xxx
+// OUTPUT:      Return Value: xxx
+//              Parameters:   xxx
+//              File:         xxx
+//  CALLS TO:   xxx, xxx, xxx
+//==============================================================================
+void generateStatusMessage(const char *format, ...) 
+{
+    va_list arguments;
+    va_start(arguments, format);
+    vsnprintf(Text.statusMessage, sizeof(Text.statusMessage), format, arguments);
+    va_end(arguments);
+    Text.statusMessage_time = time(NULL);
 }
 
 /*** input ***/
@@ -1180,20 +1188,20 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {  // The prompt
   buf[0] = '\0';
 
   while (1) {  // infinite loop that repeatedly sets the status message, refreshes the screen, and waits for a keypress to handle
-    editorSetStatusMessage(prompt, buf);
+    generateStatusMessage(prompt, buf);
     editorRefreshScreen();
 
     int c = editorReadKey();  // read user input
     if (c == DELETE_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
       if (buflen != 0) buf[--buflen] = '\0';
     } else if (c == '\x1b') {  // escape key
-      editorSetStatusMessage("");  // erase status message asking for a file name
+      generateStatusMessage("");  // erase status message asking for a file name
       if (callback) callback(buf, c);  // the if (callback) allows the caller to pass NULL for the callback, in case they don't want to use the callback
       free(buf); // free the memory allocated to buf
       return NULL;  // end loop and return without file name
     } else if (c == '\r') {  // if Enter is pressed
       if (buflen != 0) {  // if the length of the buffer where we are storing the text is not 0 - meaning the buffer is not empty
-        editorSetStatusMessage("");  // set status message back to nothing
+        generateStatusMessage("");  // set status message back to nothing
         if (callback) callback(buf, c);  // the if (callback) allows the caller to pass NULL for the callback, in case they don't want to use the callback
         return buf;  // return the file name entered
       }
@@ -1264,7 +1272,7 @@ void editorProcessKeypress() {
 
     case CTRL_KEY('q'):  // exit program if ctrl-q is pressed
       if (Text.modified && quit_times > 0) {
-        editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+        generateStatusMessage("WARNING!!! File has unsaved changes. "
           "Press Ctrl-Q %d more times to quit", quit_times);
         quit_times--;
         return;
@@ -1372,7 +1380,7 @@ int main(int argc, char *argv[])
     editorOpen(argv[1]);
   }
 
-  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
+  generateStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
   
   while (1) 
   {
