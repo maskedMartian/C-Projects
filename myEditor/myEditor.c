@@ -146,7 +146,7 @@ typedef struct textBuffer {  // global editor state
   bool modified;  // modified flag - We call a text buffer “modified” if it has been modified since opening or saving the file - used to keep track of whether the text loaded in our editor differs from what’s in the file
   char *filename,  // Name of the file being edited
        statusMessage[80];  // holds an 80 character message to the user displayed on the status bar.
-  time_t statusMessage_time;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
+  time_t statusMessageTimestamp;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
   syntaxInfo *syntax;  // a pointer to the current syntaxInfo struct in the global editor state
   struct termios originalTerminalState;  // structure to hold the original state of the terminal when our program began, before we started altering its state
 } textBuffer;
@@ -190,7 +190,7 @@ syntaxInfo syntaxDatabase[] = {  // syntaxDatabase stands for “highlight datab
 // 888        888   T88b  "Y88888P"     888     "Y88888P"     888         888     888        8888888888 "Y8888P" 
 
 void generateStatusMessage(const char *, ...);
-void editorRefreshScreen();
+void refreshScreen();
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
 
 // 8888888888 888     888 888b    888  .d8888b. 88888888888 8888888 .d88888b.  888b    888  .d8888b.  
@@ -935,22 +935,22 @@ void editorFind() {
 
 struct abuf {
   char *b;
-  int len;
+  int length;
 };
 
 #define ABUF_INIT { NULL, 0}
 
 // -----------------------------------------------------------------------------
-void abAppend(struct abuf *ab, const char *s, int len) 
+void abAppend(struct abuf *ab, const char *s, int length) 
 {
-  char *new = realloc(ab->b, ab->len + len);  // allocate memeory for the new string
+  char *new = realloc(ab->b, ab->length + length);  // allocate memeory for the new string
 
   if (new == NULL) {
     return;
   }
-  memcpy(&new[ab->len], s, len);  // copy the contents of s onto the end of the contents of new
+  memcpy(&new[ab->length], s, length);  // copy the contents of s onto the end of the contents of new
   ab->b = new;  // update ab.b
-  ab->len += len;  // update ab.len
+  ab->length += length;  // update ab.length
 }
 
 // -----------------------------------------------------------------------------
@@ -1096,15 +1096,16 @@ void editorDrawMessageBar(struct abuf *ab) {
   abAppend(ab, "\x1b[K", 3);  // clear the message bar
   int msglen = strlen(Text.statusMessage);
   if (msglen > Text.screenColumns) msglen = Text.screenColumns;  // if message length is grater than the width of the screen, cut it down
-  if (msglen && time(NULL) - Text.statusMessage_time < 5)  // display the message only if it is lenn than 5 seconds old
+  if (msglen && time(NULL) - Text.statusMessageTimestamp < 5)  // display the message only if it is lenn than 5 seconds old
     abAppend(ab, Text.statusMessage, msglen);
 }
 
 // -----------------------------------------------------------------------------
-void editorRefreshScreen() {
+void refreshScreen() {
   editorScroll();
 
   struct abuf ab = ABUF_INIT;
+  char buf[32];
 
   abAppend(&ab, "\x1b[?25l", 6);  // set mode escape sequence - hide cursor
   // abAppend(&ab, "\x1b[2J", 4); REMOVED
@@ -1114,21 +1115,21 @@ void editorRefreshScreen() {
   editorDrawStatusBar(&ab);
   editorDrawMessageBar(&ab);
 
-  char buf[32];
+  
   snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (Text.cursorYPosition - Text.rowOffset) + 1,
                                             (Text.displayXPosition - Text.columnOffset) + 1);
   abAppend(&ab, buf, strlen(buf));
 
   abAppend(&ab, "\x1b[?25h", 6);  // reset mode escape sequence - show cursor
   
-  write(STDOUT_FILENO, ab.b, ab.len);
+  write(STDOUT_FILENO, ab.b, ab.length);  // write ab.b to the screen (STDOUT_FILENO)
   abFree(&ab);
 }
 
 #if 0
 // -----------------------------------------------------------------------------
 // clear screen, draw tildes, and position cursor at top-left
-void editorRefreshScreen()
+void refreshScreen()
 {
   struct abuf ab = ABUF_INIT;  // initialize a new empty buffer, ab
 
@@ -1144,7 +1145,7 @@ void editorRefreshScreen()
 
   abAppend(&ab, "\x1b[H", 3);  // append another 3-byte escape sequence (\x1b, [, H ) to the buffer which will reposition the cursor
 
-   write(STDOUT_FILENO, ab.b, ab.len);  // wriet the contents of the buffer to the terminal
+   write(STDOUT_FILENO, ab.b, ab.length);  // wriet the contents of the buffer to the terminal
    abFree(&ab);  // deallocate the buffer memory
 }
 #endif
@@ -1165,7 +1166,7 @@ void generateStatusMessage(const char *format, ...)
     va_start(arguments, format);
     vsnprintf(Text.statusMessage, sizeof(Text.statusMessage), format, arguments);
     va_end(arguments);
-    Text.statusMessage_time = time(NULL);
+    Text.statusMessageTimestamp = time(NULL);
 }
 
 /*** input ***/
@@ -1189,7 +1190,7 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {  // The prompt
 
   while (1) {  // infinite loop that repeatedly sets the status message, refreshes the screen, and waits for a keypress to handle
     generateStatusMessage(prompt, buf);
-    editorRefreshScreen();
+    refreshScreen();
 
     int c = editorReadKey();  // read user input
     if (c == DELETE_KEY || c == CTRL_KEY('h') || c == BACKSPACE) {
@@ -1364,7 +1365,7 @@ void initEditor() {
   Text.modified = false;
   Text.filename = NULL;
   Text.statusMessage[0] = '\0';
-  Text.statusMessage_time = 0;
+  Text.statusMessageTimestamp = 0;
   Text.syntax = NULL;  // When Text.syntax is NULL, that means there is no filetype for the current file, and no syntax highlighting should be done
 
   if (getWindowSize(&Text.screenRows, &Text.screenColumns) == -1) die("getWindowSize");
@@ -1384,7 +1385,7 @@ int main(int argc, char *argv[])
   
   while (1) 
   {
-    editorRefreshScreen();
+    refreshScreen();
     editorProcessKeypress();
   }
 
