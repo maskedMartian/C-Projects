@@ -78,21 +78,21 @@ enum specialKeys {
 
 enum foregroundColors {  // ANSI foreground color codes
     BLACK = 30,
-    RED,  // light rec
-    GREEN,  // green
-    YELLOW,  // mustard
-    BLUE,  // azure blue
-    MAGENTA,  // purple
-    CYAN,     // sky blue
-    WHITE,  // light gray
-    GRAY = 90,  // dark grey
-    BRIGHT_RED,  // dark red
-    BRIGHT_GREEN,  // lime green
-    BRIGHT_YELLOW,  // yellow
-    BRIGHT_BLUE,  // royal blue
+    RED,             // light red
+    GREEN,           // green
+    YELLOW,          // mustard
+    BLUE,            // azure blue
+    MAGENTA,         // purple
+    CYAN,            // sky blue
+    WHITE,           // light gray
+    GRAY = 90,       // dark grey
+    BRIGHT_RED,      // dark red
+    BRIGHT_GREEN,    // lime green
+    BRIGHT_YELLOW,   // yellow
+    BRIGHT_BLUE,     // royal blue
     BRIGHT_MAGENTA,  // violet
-    BRIGHT_CYAN,  // aqua
-    BRIGHT_WHITE  // white
+    BRIGHT_CYAN,     // aqua
+    BRIGHT_WHITE     // white
 };
 
 enum textColors {  // enum of highlight colors
@@ -142,13 +142,13 @@ typedef struct textBuffer {  // global editor state
       screenRows,  // qty of rows on the screen - window size
       screenColumns,  // qty of columns on the screen - window size
       totalRows;  // the number of rows (lines) of text being displayed/stored by the editor
-  textRow *row;  // Hold a single row of test, both as read from a file, and as displayed on the screen
-  bool modified;  // modified flag - We call a text buffer “modified” if it has been modified since opening or saving the file - used to keep track of whether the text loaded in our editor differs from what’s in the file
-  char *filename,  // Name of the file being edited
-       statusMessage[80];  // holds an 80 character message to the user displayed on the status bar.
-  time_t statusMessageTimestamp;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
-  syntaxInfo *syntax;  // a pointer to the current syntaxInfo struct in the global editor state
-  struct termios originalTerminalState;  // structure to hold the original state of the terminal when our program began, before we started altering its state
+      textRow *row;  // Hold a single row of test, both as read from a file, and as displayed on the screen
+      bool modified;  // modified flag - We call a text buffer “modified” if it has been modified since opening or saving the file - used to keep track of whether the text loaded in our editor differs from what’s in the file
+      char *filename,  // Name of the file being edited
+      statusMessage[80];  // holds an 80 character message to the user displayed on the status bar.
+      time_t statusMessageTimestamp;  // timestamp for the status message - current status message will only display for five seconds or until the next key is pressed since the screen in refreshed only when a key is pressed.
+      syntaxInfo *syntax;  // a pointer to the current syntaxInfo struct in the global editor state
+      struct termios originalTerminalState;  // structure to hold the original state of the terminal when our program began, before we started altering its state
 } textBuffer;
 
 textBuffer Text;
@@ -220,130 +220,191 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int));
 // -----------------------------------------------------------------------------
 void die(const char *string)  // prints error message and exits program with error code 1
 {
-  write(STDOUT_FILENO, CLEAR_SCREEN, CLEAR_SCREEN_SIZE);  // clear the screen
-  write(STDOUT_FILENO, CURSOR_HOME, CURSOR_HOME_SIZE);  // position the cursor at the top left of the screen
+    write(STDOUT_FILENO, CLEAR_SCREEN, CLEAR_SCREEN_SIZE);  // clear the screen
+    write(STDOUT_FILENO, CURSOR_HOME, CURSOR_HOME_SIZE);  // position the cursor at the top left of the screen
 
-  perror(string);  // looks at the global errno variable and prints a decriptive error message for it preceeded by the string given to it
-  exit(1);
+    perror(string);  // looks at the global errno variable and prints a descriptive error message for it preceeded by the string given to it
+    exit(1);
 }
 
 // -----------------------------------------------------------------------------
 void disableRawMode()  // disable raw text input mode
 {
-  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &Text.originalTerminalState) == ERROR) {  // set the terminal's attribute flags to their original states
-    die("tcsetattr");                                             // and exit program if there is an error
-  }
+    // set the terminal's attribute flags to their original states
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &Text.originalTerminalState) == ERROR)
+    {
+        die("tcsetattr");  // and exit program if there is an error
+    }
 }
 
 // -----------------------------------------------------------------------------
 void enableRawMode()  // enable raw text input mode
 {
-  if (tcgetattr(STDIN_FILENO, &Text.originalTerminalState) == ERROR) {  // read the terminal's attribute flags into orig_terminos
-    die("tcgetattr");                                  // and exit program if there is an error
-  }
-  atexit(disableRawMode);  // call the disableRawMode function automatically upon exit from the program form either retunr from main() 
-                           // or using exit()
+    // read the terminal's attribute flags into orig_terminos
+    if (tcgetattr(STDIN_FILENO, &Text.originalTerminalState) == ERROR)
+    {
+        die("tcgetattr");  // and exit program if there is an error
+    }
+    // call the disableRawMode function automatically upon exit from the program form either return from main() or using exit()
+    atexit(disableRawMode);  
 
-  struct termios rawInputState = Text.originalTerminalState;
-  rawInputState.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);  // unset the input bitflags for enabling Ctrl-C, enabling Ctrl-M, enabling 
-                                                             // parity checking, stripping the 8th bit of input, enabling Ctrl-S and Ctrl-Q
-  rawInputState.c_oflag &= ~(OPOST);  // unset the output flag for automatically prefixing a new line character with a carriage retrun character
-  rawInputState.c_cflag |= (CS8);  // set all the bits for character size to 8 bits per byte
-  rawInputState.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);  // unset the loacal bitflags for echoing to the terminal, canonical mode, enabling 
-                                                    // Ctrl-V, enabling Ctrl-C and Ctrl-Z
-  rawInputState.c_cc[VMIN] = 0;  // sets the minimum number of bytes of input needed for read() to return to 0 - read can return as soon as there 
-                       // is any input
-  rawInputState.c_cc[VTIME] = 1;  // sets the maximum amount of time to wait befoore read() returns to 1/10 of a second (100 milliseconds) - if 
-                        // read() times out, it returns 0, which makes sense because its usual return value in the number of bytes read
-  if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &rawInputState) == ERROR ) {  // set the terminal's attribute flags to those in raw
-    die("tcsetattr");                                     // and exit program if there is an error
-  }
+    struct termios rawInputState = Text.originalTerminalState;
+    // unset the input bitflags for enabling Ctrl-C, enabling Ctrl-M, enabling parity checking, stripping the 8th bit of input, enabling Ctrl-S and Ctrl-Q
+    rawInputState.c_iflag &= ~(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
+    // unset the output flag for automatically prefixing a new line character with a carriage retrun character
+    rawInputState.c_oflag &= ~(OPOST);
+    // set all the bits for character size to 8 bits per byte
+    rawInputState.c_cflag |= (CS8);
+    // unset the local bitflags for echoing to the terminal, canonical mode, enabling Ctrl-V, enabling Ctrl-C and Ctrl-Z
+    rawInputState.c_lflag &= ~(ECHO | ICANON | IEXTEN | ISIG);
+    // sets the minimum number of bytes of input needed for read() to return to 0 - read can return as soon as there is any input
+    rawInputState.c_cc[VMIN] = 0;
+    // sets the maximum amount of time to wait before read() returns to 1/10 of a second (100 milliseconds) - if 
+    // read() times out, it returns 0, which makes sense because its usual return value in the number of bytes read
+    rawInputState.c_cc[VTIME] = 1;
+                        
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &rawInputState) == ERROR )  // set the terminal's attribute flags to those in raw
+    {
+        die("tcsetattr");  // and exit program if there is an error
+    }
 }
 
 // -----------------------------------------------------------------------------
 // waits for one keypress and returns it
 int editorReadKey() 
 {
-  int nread;
-  char keypress;
-  while ((nread = read(STDIN_FILENO, &keypress, 1)) != 1) {  // read 1 byte from standard input (keyboard) into c
-    if (nread == ERROR && errno != EAGAIN) die("read");  // and exit program if there is an error
-  }
+    int nread;
+    char keypress;
 
-  if (keypress == '\x1b') {  // if c is an escape charater
-    char seq[3];
-
-    // read the next 2 bytes into seq
-    if (read(STDIN_FILENO, &seq[0], 1) != 1) return '\x1b';  //--- These two reads are the reason I have
-    if (read(STDIN_FILENO, &seq[1], 1) != 1) return '\x1b';  //--- to press the escape button 3 times???
-                                                             //--- because they don't time out???
-    if (seq[0] == '[') {
-      if (seq[1] >= '0' && seq[1] <= '9') {
-        if (read(STDIN_FILENO, &seq[2], 1) != 1) return '\x1b';
-        if (seq[2] == '~') {
-          switch (seq[1]) {
-            case '1': return HOME_KEY;
-            case '3': return DELETE_KEY;
-            case '4': return END_KEY;
-            case '5': return PAGE_UP;
-            case '6': return PAGE_DOWN;
-            case '7': return HOME_KEY;
-            case '8': return END_KEY;
-          }
+    // read 1 byte from standard input (keyboard) into c
+    while ((nread = read(STDIN_FILENO, &keypress, 1)) != 1)
+    {
+        if (nread == ERROR && errno != EAGAIN) 
+        {
+            die("read");  // and exit program if there is an error
         }
-      } else {
-        switch (seq[1]) {  // Arrow key was pressed
-          case 'A': return ARROW_UP;
-          case 'B': return ARROW_DOWN;
-          case 'C': return ARROW_RIGHT;
-          case 'D': return ARROW_LEFT;
-          case 'H': return HOME_KEY;
-          case 'F': return END_KEY;
-        }
-      }
-    } else if (seq[0] == 'O') {
-      switch (seq[1]) {
-        case 'H': return HOME_KEY;
-        case 'F': return END_KEY;
-      }
     }
 
-    return '\x1b';
-  } else {
-    return keypress;
-  }
+    if (keypress == '\x1b') // if c is an escape charater
+    {
+        char seq[3];
+
+        // read the next 2 bytes into seq
+        //--- These two reads are the reason I have
+        //--- to press the escape button 3 times???
+        //--- because they don't time out???
+        if (read(STDIN_FILENO, &seq[0], 1) != 1) 
+        {
+            return '\x1b';
+        }
+        if (read(STDIN_FILENO, &seq[1], 1) != 1)
+        {
+            return '\x1b';
+        }
+                                                             
+        if (seq[0] == '[') 
+        {
+            if (seq[1] >= '0' && seq[1] <= '9') 
+            {
+                if (read(STDIN_FILENO, &seq[2], 1) != 1) 
+                {
+                    return '\x1b';
+                }
+                if (seq[2] == '~') 
+                {
+                    switch (seq[1]) 
+                    {
+                        case '1': 
+                            return HOME_KEY;
+                        case '3': 
+                            return DELETE_KEY;
+                        case '4': 
+                            return END_KEY;
+                        case '5': 
+                            return PAGE_UP;
+                        case '6': 
+                            return PAGE_DOWN;
+                        case '7': 
+                            return HOME_KEY;
+                        case '8': 
+                            return END_KEY;
+                    }
+                }
+            } 
+            else 
+            {
+                switch (seq[1])  // Arrow key was pressed
+                {
+                    case 'A': 
+                        return ARROW_UP;
+                    case 'B': 
+                        return ARROW_DOWN;
+                    case 'C': 
+                        return ARROW_RIGHT;
+                    case 'D': 
+                        return ARROW_LEFT;
+                    case 'H': 
+                        return HOME_KEY;
+                    case 'F': 
+                        return END_KEY;
+                }
+            }
+        } 
+        else if (seq[0] == 'O') 
+        {
+            switch (seq[1]) 
+            {
+                case 'H': 
+                    return HOME_KEY;
+                case 'F': 
+                    return END_KEY;
+            }
+        }
+
+        return '\x1b';
+    } 
+    else 
+    {
+        return keypress;
+    }
 }
 
 // -----------------------------------------------------------------------------
 int getCursorPosition(int *rows, int *cols)
 {
-  char buf[32];
-  unsigned int i = 0;
+    char buf[32];
+    unsigned int i = 0;
 
-  if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) {
-    return -1;
-  }
-
-  
-  while (i < sizeof(buf) - 1) {
-    if (read(STDIN_FILENO, &buf[i], 1) != 1) {
-      break;
+    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) 
+    {
+        return -1;
     }
-    if (buf[i] == 'R') {
-      break;
+
+    while (i < sizeof(buf) - 1) 
+    {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1) 
+        {
+            break;
+        }
+        if (buf[i] == 'R') 
+        {
+            break;
+        }
+        i++;
     }
-    i++;
-  }
-  buf[i] = '\0';  // terminate the string in buf with a null character
 
-  if (buf[0] != '\x1b' || buf[1] != '[') {  // check that buf[] contains an escape sequence, if not return -1 (error)
-    return -1;
-  }
-  if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) {  // copy the contents of buf[2], buf[3] into rows, cols respectively 
-    return -1;
-  }
+    buf[i] = '\0';  // terminate the string in buf with a null character
 
-  return 0;
+    if (buf[0] != '\x1b' || buf[1] != '[')  // check that buf[] contains an escape sequence, if not return -1 (error)
+    {
+        return -1;
+    }
+    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2)  // copy the contents of buf[2], buf[3] into rows, cols respectively 
+    {
+        return -1;
+    }
+
+    return 0;
 }
 
 // -----------------------------------------------------------------------------
